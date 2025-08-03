@@ -1,0 +1,289 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdfkb-mcp"
+version = "0.1.0"
+description = "A Model Context Protocol server for managing PDF documents with vector search capabilities"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "PDF Knowledgebase MCP Team" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = [
+    "mcp",
+    "pdf",
+    "vector-search",
+    "embeddings",
+    "knowledge-base",
+    "ai",
+    "openai",
+    "chroma",
+]
+requires-python = ">=3.8"
+dependencies = [
+    # Core MCP runtime
+    "fastmcp>=2.11.1",
+
+    # Vector database
+    "chromadb>=1.0.15",
+
+    # OpenAI API
+    "openai>=1.99.1",
+
+    # File system monitoring
+    "watchdog>=6.0.0",
+
+    # Environment configuration
+    "dotenv>=0.9.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+
+    # Code quality
+    "black>=25.1.0",
+    "isort>=6.0.0",
+    "flake8>=7.3.0",
+    "mypy>=1.17.0",
+
+    # Type stubs
+    "types-aiofiles",
+
+    # Development utilities
+    "pre-commit>=4.2.0",
+    "bump2version>=1.0.0",
+]
+
+
+unstructured = [
+    "unstructured[pdf]>=0.18.11",
+]
+
+pymupdf4llm = [
+    "pymupdf4llm>=0.0.27",
+]
+
+langchain = [
+    "langchain-text-splitters>=0.3.9",
+]
+
+mineru = [
+    "mineru[pipeline]>=2.1.10",
+]
+
+marker = [
+    "marker-pdf>=1.8.3",
+]
+
+docling = [
+    "docling>=2.43.0",
+]
+
+docling-complete = [
+    "docling>=2.43.0",
+    "easyocr>=1.7.2",
+    "pytesseract>=0.3.13",
+    "rapidocr-onnxruntime>=1.2.3",
+]
+
+llm = [
+    "httpx>=0.28.1",
+    "PyMuPDF>=1.26.3",
+    "Jinja2>=3.1.6",
+    "Pillow>=10.1.0",
+]
+
+unstructured_chunker = [
+    "unstructured>=0.18.11",
+]
+
+all = [
+    # Include all optional dependency groups
+    "pdfkb-mcp[dev]",
+    "pdfkb-mcp[unstructured]",
+    "pdfkb-mcp[pymupdf4llm]",
+    "pdfkb-mcp[langchain]",
+    "pdfkb-mcp[mineru]",
+    "pdfkb-mcp[marker]",
+    "pdfkb-mcp[docling-complete]",
+    "pdfkb-mcp[llm]",
+    "pdfkb-mcp[unstructured_chunker]",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/pdfkb-mcp"
+Documentation = "https://github.com/your-org/pdfkb-mcp#readme"
+Repository = "https://github.com/your-org/pdfkb-mcp"
+Issues = "https://github.com/your-org/pdfkb-mcp/issues"
+
+[project.scripts]
+pdfkb-mcp = "pdfkb.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdfkb"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/README.md",
+    "/pyproject.toml",
+]
+
+# Black configuration
+[tool.black]
+line-length = 120
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+# isort configuration
+[tool.isort]
+profile = "black"
+line_length = 120
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+# flake8 configuration
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
+
+# mypy configuration
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "chromadb.*",
+    "unstructured.*",
+    "fastmcp.*",
+    "mcp.*",
+]
+ignore_missing_imports = true
+
+# pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --strict-config"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "performance: marks tests as performance tests",
+    "asyncio: marks tests as asyncio tests",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["src/pdfkb"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# Hatch environment configuration
+[tool.hatch.envs.default]
+dependencies = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-mock",
+    "black",
+    "isort",
+    "mypy",
+    "flake8",
+    # Common optional dependencies needed by tests
+    "unstructured[pdf]>=0.18.11",
+    "pymupdf4llm>=0.0.27",
+    "langchain-text-splitters>=0.3.9",
+    "docling>=2.43.0",
+    "easyocr>=1.7.2",
+    "reportlab>=4.4.0",
+]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest {args:tests}"
+test-cov = "pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=src/pdfkb {args:tests}"
+cov-html = "pytest --cov-report=html --cov-config=pyproject.toml --cov=src/pdfkb {args:tests}"
+format = [
+    "black src tests",
+    "isort src tests",
+]
+lint = [
+    "black --check --diff src tests",
+    "isort --check-only --diff src tests",
+    "flake8 src tests",
+    # "mypy src",  # Temporarily disabled - needs type annotation fixes
+]

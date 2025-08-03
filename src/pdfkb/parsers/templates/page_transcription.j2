@@ -1,0 +1,27 @@
+Convert this PDF page image to markdown format. Follow these guidelines:
+
+1. Maintain accurate markdown syntax and structure
+2. Preserve document hierarchy (headers, lists, tables)
+3. Replace images with descriptive text in brackets like [Image: {{ image_description_format | default('description') }}]
+4. Ensure 1:1 transcription accuracy (do not summarize{% if strict_transcription %} - be extremely precise{% endif %})
+5. Maintain proper formatting for tables, lists, and text blocks
+6. Use appropriate header levels (# ## ###) based on visual hierarchy
+7. Preserve any mathematical formulas or equations in text format
+8. Include any footnotes or references found on the page
+{% if additional_instructions %}
+9. {{ additional_instructions }}
+{% endif %}
+
+{% if page_number %}
+This is page {{ page_number }} of the document.
+{% endif %}
+
+{% if preserve_formatting %}
+Pay special attention to:
+- Table structures and alignment
+- List formatting (ordered/unordered)
+- Code blocks or monospace text
+- Special formatting like bold, italic, underline
+{% endif %}
+
+Return only the markdown content, no additional commentary.

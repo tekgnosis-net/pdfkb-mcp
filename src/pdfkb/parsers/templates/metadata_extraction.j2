@@ -1,0 +1,31 @@
+Analyze these first few pages of a PDF document and extract:
+
+1. **Title**: The main title of the document (not headers/footers)
+2. **Summary**: A concise {{ summary_length | default('2-3') }} sentence summary of what this document is about
+
+Look for:
+- Main document title (often largest text on first page)
+- Abstract, introduction, or executive summary sections
+- Key topics and themes
+{% if focus_areas %}
+- {{ focus_areas | join('\n- ') }}
+{% endif %}
+
+{% if document_type %}
+Consider that this appears to be a {{ document_type }} document.
+{% endif %}
+
+{% if page_count %}
+This document has {{ page_count }} total pages.
+{% endif %}
+
+Return your response in this exact format:
+TITLE: [extracted title]
+SUMMARY: [{{ summary_length | default('2-3') }} sentence summary]
+
+If you cannot determine a clear title or summary, return "TITLE: " or "SUMMARY: " with no content after the colon.
+
+{% if fallback_instructions %}
+Additional guidance:
+{{ fallback_instructions }}
+{% endif %}
