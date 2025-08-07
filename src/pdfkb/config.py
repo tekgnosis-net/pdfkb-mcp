@@ -25,15 +25,15 @@ class ServerConfig:
     cache_dir: Path = field(default_factory=lambda: Path(""))
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    embedding_model: str = "text-embedding-3-large"
+    embedding_model: str = "text-embedding-3-small"
     embedding_batch_size: int = 100
     vector_search_k: int = 5
     file_scan_interval: int = 60
     log_level: str = "INFO"
     supported_extensions: List[str] = field(default_factory=lambda: [".pdf"])
     unstructured_pdf_processing_strategy: str = "fast"
-    pdf_parser: str = "marker"
-    pdf_chunker: str = "unstructured"
+    pdf_parser: str = "pymupdf4llm"
+    pdf_chunker: str = "langchain"
     docling_config: Dict[str, Any] = field(default_factory=dict)
     # Marker LLM configuration
     marker_use_llm: bool = False

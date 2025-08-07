@@ -29,7 +29,9 @@ class ChunkerUnstructured(Chunker):
             # Handle cases where __version__ might not exist
             self.unstructured_version = getattr(unstructured, "__version__", "unknown")
         except ImportError:
-            raise ImportError("Unstructured library not available. Install with: pip install unstructured")
+            raise ImportError(
+                "Unstructured library not available. Install with: pip install pdfkb-mcp[unstructured_chunker]"
+            )
 
     def chunk(self, markdown_content: str, metadata: Dict[str, Any]) -> List[Chunk]:
         """Chunk markdown content using unstructured library.

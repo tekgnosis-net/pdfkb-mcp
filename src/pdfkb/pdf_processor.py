@@ -85,24 +85,24 @@ class PDFProcessor:
 
                 return MinerUPDFParser(config=mineru_config, cache_dir=cache_dir)
             except ImportError as e:
-                logger.warning(f"MinerU not available ({e}), falling back to Unstructured")
-                # Try to create Unstructured parser as fallback
+                logger.warning(
+                    f"MinerU not available ({e}). Falling back to PyMuPDF4LLM. "
+                    "To enable MinerU, install: pip install pdfkb-mcp[mineru]"
+                )
+                # Prefer PyMuPDF4LLM as primary fallback
                 try:
-                    return UnstructuredPDFParser(
-                        strategy=self.config.unstructured_pdf_processing_strategy,
-                        cache_dir=cache_dir,
-                    )
+                    return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
                 except ImportError:
-                    # Try PyMuPDF4LLM as second fallback
+                    # Try Unstructured as secondary fallback
                     try:
-                        return PyMuPDF4LLMParser(
-                            config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir
+                        return UnstructuredPDFParser(
+                            strategy=self.config.unstructured_pdf_processing_strategy,
+                            cache_dir=cache_dir,
                         )
                     except ImportError:
                         raise PDFProcessingError(
-                            "MinerU, Unstructured, and PyMuPDF4LLM libraries are not available. "
-                            "Install at least one with: pip install unstructured[pdf], "
-                            "pip install pymupdf4llm, or ensure mineru CLI is available"
+                            "No PDF parser available. Install one of: "
+                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[mineru]"
                         )
         elif parser_type == "marker":
             try:
@@ -115,24 +115,24 @@ class PDFProcessor:
 
                 return MarkerPDFParser(config=marker_config, cache_dir=cache_dir)
             except ImportError as e:
-                logger.warning(f"Marker not available ({e}), falling back to Unstructured")
-                # Try to create Unstructured parser as fallback
+                logger.warning(
+                    f"Marker not available ({e}). Falling back to PyMuPDF4LLM. "
+                    "To enable Marker, install: pip install pdfkb-mcp[marker]"
+                )
+                # Prefer PyMuPDF4LLM as primary fallback
                 try:
-                    return UnstructuredPDFParser(
-                        strategy=self.config.unstructured_pdf_processing_strategy,
-                        cache_dir=cache_dir,
-                    )
+                    return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
                 except ImportError:
-                    # Try PyMuPDF4LLM as second fallback
+                    # Try Unstructured as secondary fallback
                     try:
-                        return PyMuPDF4LLMParser(
-                            config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir
+                        return UnstructuredPDFParser(
+                            strategy=self.config.unstructured_pdf_processing_strategy,
+                            cache_dir=cache_dir,
                         )
                     except ImportError:
                         raise PDFProcessingError(
-                            "Marker, Unstructured, and PyMuPDF4LLM libraries are not available. "
-                            "Install at least one with: pip install marker-pdf, "
-                            "pip install unstructured[pdf], or pip install pymupdf4llm"
+                            "No PDF parser available. Install one of: "
+                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[marker]"
                         )
         elif parser_type == "docling":
             try:
@@ -150,24 +150,24 @@ class PDFProcessor:
 
                 return DoclingParser(config=merged_config, cache_dir=cache_dir)
             except ImportError as e:
-                logger.warning(f"Docling not available ({e}), falling back to Unstructured")
-                # Try to create Unstructured parser as fallback
+                logger.warning(
+                    f"Docling not available ({e}). Falling back to PyMuPDF4LLM. "
+                    "To enable Docling, install: pip install pdfkb-mcp[docling]"
+                )
+                # Prefer PyMuPDF4LLM as primary fallback
                 try:
-                    return UnstructuredPDFParser(
-                        strategy=self.config.unstructured_pdf_processing_strategy,
-                        cache_dir=cache_dir,
-                    )
+                    return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
                 except ImportError:
-                    # Try PyMuPDF4LLM as second fallback
+                    # Try Unstructured as secondary fallback
                     try:
-                        return PyMuPDF4LLMParser(
-                            config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir
+                        return UnstructuredPDFParser(
+                            strategy=self.config.unstructured_pdf_processing_strategy,
+                            cache_dir=cache_dir,
                         )
                     except ImportError:
                         raise PDFProcessingError(
-                            "Docling, Unstructured, and PyMuPDF4LLM libraries are not available. "
-                            "Install at least one with: pip install docling[complete], "
-                            "pip install unstructured[pdf], or pip install pymupdf4llm"
+                            "No PDF parser available. Install one of: "
+                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[docling]"
                         )
         elif parser_type == "llm":
             try:
@@ -184,23 +184,24 @@ class PDFProcessor:
 
                 return LLMParser(config=merged_config, cache_dir=cache_dir)
             except ImportError as e:
-                logger.warning(f"LLM parser not available ({e}), falling back to Unstructured")
-                # Try to create Unstructured parser as fallback
+                logger.warning(
+                    f"LLM parser not available ({e}). Falling back to PyMuPDF4LLM. "
+                    "To enable LLM parser, install its dependencies or use: pip install pdfkb-mcp[llm]"
+                )
+                # Prefer PyMuPDF4LLM as primary fallback
                 try:
-                    return UnstructuredPDFParser(
-                        strategy=self.config.unstructured_pdf_processing_strategy,
-                        cache_dir=cache_dir,
-                    )
+                    return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
                 except ImportError:
-                    # Try PyMuPDF4LLM as second fallback
+                    # Try Unstructured as secondary fallback
                     try:
-                        return PyMuPDF4LLMParser(
-                            config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir
+                        return UnstructuredPDFParser(
+                            strategy=self.config.unstructured_pdf_processing_strategy,
+                            cache_dir=cache_dir,
                         )
                     except ImportError:
                         raise PDFProcessingError(
-                            "LLM parser dependencies not available. "
-                            "Install with: pip install httpx pymupdf pillow jinja2"
+                            "No PDF parser available. Install one of: "
+                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[llm]"
                         )
             except ValueError as e:
                 logger.warning(f"LLM parser configuration error ({e}), falling back to Unstructured")
@@ -216,20 +217,20 @@ class PDFProcessor:
                         "Set OPENROUTER_API_KEY environment variable or install fallback: "
                         "pip install unstructured[pdf]"
                     )
-        else:  # default to unstructured
+        else:
+            # Safety default: prefer PyMuPDF4LLM, then Unstructured
             try:
-                return UnstructuredPDFParser(
-                    strategy=self.config.unstructured_pdf_processing_strategy, cache_dir=cache_dir
-                )
+                return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
             except ImportError as e:
-                logger.warning(f"Unstructured not available ({e}), trying PyMuPDF4LLM as fallback")
-                # Try to create PyMuPDF4LLM parser as fallback
+                logger.warning(f"PyMuPDF4LLM not available ({e}). Trying Unstructured as fallback.")
                 try:
-                    return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
+                    return UnstructuredPDFParser(
+                        strategy=self.config.unstructured_pdf_processing_strategy, cache_dir=cache_dir
+                    )
                 except ImportError:
                     raise PDFProcessingError(
-                        "Neither Unstructured nor PyMuPDF4LLM libraries are available. "
-                        "Install with: pip install unstructured[pdf] or pip install pymupdf4llm"
+                        "No PDF parser available. Install one of: pip install pymupdf4llm or "
+                        + "pip install unstructured[pdf]"
                     )
 
     def _create_chunker(self) -> Chunker:
@@ -244,16 +245,33 @@ class PDFProcessor:
             try:
                 return LangChainChunker(chunk_size=self.config.chunk_size, chunk_overlap=self.config.chunk_overlap)
             except ImportError as e:
-                raise PDFProcessingError(
-                    f"LangChain chunker not available: {e}. " "Install with: pip install langchain-text-splitters"
+                logger.warning(
+                    f"LangChain chunker not available ({e}). Falling back to Unstructured chunker. "
+                    "To enable LangChain, install: pip install pdfkb-mcp[langchain]"
                 )
+                # Fallback to Unstructured if available
+                try:
+                    return ChunkerUnstructured()
+                except ImportError:
+                    raise PDFProcessingError(
+                        "No chunker available. Install one of: "
+                        "pip install pdfkb-mcp[langchain] or pip install pdfkb-mcp[unstructured_chunker]"
+                    )
         else:  # default to unstructured
             try:
                 return ChunkerUnstructured()
             except ImportError as e:
-                raise PDFProcessingError(
-                    f"Unstructured chunker not available: {e}. " "Install with: pip install unstructured"
+                logger.warning(
+                    f"Unstructured chunker not available ({e}). Falling back to LangChain chunker. "
+                    "To enable Unstructured, install: pip install pdfkb-mcp[unstructured_chunker]"
                 )
+                try:
+                    return LangChainChunker(chunk_size=self.config.chunk_size, chunk_overlap=self.config.chunk_overlap)
+                except ImportError:
+                    raise PDFProcessingError(
+                        "No chunker available. Install one of: "
+                        "pip install pdfkb-mcp[langchain] or pip install pdfkb-mcp[unstructured_chunker]"
+                    )
 
     def _get_document_cache_dir(self, file_path: Path) -> Path:
         """Get the cache directory for a specific document.

@@ -73,6 +73,25 @@ class PDFKnowledgebaseServer:
 
             self.pdf_processor = PDFProcessor(self.config, self.embedding_service, self.cache_manager)
 
+            # Log startup configuration summary for diagnostics
+            try:
+                parser_name = (
+                    type(self.pdf_processor.parser).__name__ if self.pdf_processor else str(self.config.pdf_parser)
+                )
+                chunker_name = (
+                    type(self.pdf_processor.chunker).__name__ if self.pdf_processor else str(self.config.pdf_chunker)
+                )
+            except Exception:
+                parser_name = str(self.config.pdf_parser)
+                chunker_name = str(self.config.pdf_chunker)
+            logger.info(
+                "Startup configuration: Parser=%s, Chunker=%s, EmbeddingModel=%s, KnowledgebasePath=%s, CacheDir=%s",
+                parser_name,
+                chunker_name,
+                self.config.embedding_model,
+                self.config.knowledgebase_path,
+                self.config.cache_dir,
+            )
             # Handle re-processing of cached documents after components are initialized
             await self._handle_post_initialization_reprocessing()
 

@@ -45,9 +45,7 @@ class LangChainChunker(Chunker):
                 separators=["\n\n", "\n", ". ", " ", ""],
             )
         except ImportError:
-            raise ImportError(
-                "LangChain text splitters not available. Install with: pip install langchain-text-splitters"
-            )
+            raise ImportError("LangChain text splitters not available. Install with: pip install pdfkb-mcp[langchain]")
 
     def chunk(self, markdown_content: str, metadata: Dict[str, Any]) -> List[Chunk]:
         """Chunk markdown content using LangChain's splitter.

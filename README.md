@@ -101,8 +101,7 @@ uvx pdfkb-mcp
 - [`add_document(path, metadata?)`](src/pdfkb/main.py:278) - Add PDF to knowledgebase
 - [`search_documents(query, limit=5, metadata_filter?)`](src/pdfkb/main.py:345) - Semantic search across PDFs
 - [`list_documents(metadata_filter?)`](src/pdfkb/main.py:422) - List all documents with metadata
-- [`remove_document(document_id)`](src/pdfkb/main.py:488) - Remove document from knowledgebase</search>
-</search_and_replace>
+- [`remove_document(document_id)`](src/pdfkb/main.py:488) - Remove document from knowledgebase
 
 **Resources** (Data your client can access):
 - `pdf://{document_id}` - Full document content as JSON
@@ -120,8 +119,7 @@ Document Type & Priority?
 ├── 📊 Business Reports → Docling (medium speed, best tables)
 ├── ⚖️ Balanced Quality → Marker (medium speed, good structure)
 └── 🎯 Maximum Accuracy → LLM (slow, vision-based API calls)
-```</search>
-</search_and_replace>
+```
 
 ### Performance Comparison
 
@@ -130,9 +128,8 @@ Document Type & Priority?
 | **PyMuPDF4LLM** | **Fastest** | Low | Good | Basic | Speed priority |
 | **MinerU** | Fast (with GPU) | High | Excellent | Excellent | Scientific papers |
 | **Docling** | Medium | Medium | Excellent | **Excellent** | Business documents |
-| **Marker** | Medium | Medium | Excellent | Good | **Balanced (default)** |
-| **LLM** | Slow | Low | Excellent | Excellent | Maximum accuracy |</search>
-</search_and_replace>
+| **Marker** | Medium | Medium | Excellent | Good | **Balanced** |
+| **LLM** | Slow | Low | Excellent | Excellent | Maximum accuracy |
 
 *Benchmarks from research studies and technical reports*
 
@@ -149,7 +146,9 @@ Document Type & Priority?
       "args": ["pdfkb-mcp"],
       "env": {
         "OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
-        "PDF_PARSER": "marker"
+        "PDF_PARSER": "pymupdf4llm",
+        "PDF_CHUNKER": "langchain",
+        "EMBEDDING_MODEL": "text-embedding-3-small"
       },
       "transport": "stdio"
     }
@@ -278,9 +277,13 @@ Document Type & Priority?
 | `OPENAI_API_KEY` | *required* | OpenAI API key for embeddings |
 | `KNOWLEDGEBASE_PATH` | `./pdfs` | Directory containing PDF files |
 | `CACHE_DIR` | `./.cache` | Cache directory for processing |
-| `PDF_PARSER` | `marker` | Parser: `marker`, `pymupdf4llm`, `mineru`, `docling`, `llm` |
-| `CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
-| `EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI embedding model |
+-| `PDF_PARSER` | `marker` | Parser: `marker`, `pymupdf4llm`, `mineru`, `docling`, `llm` |
++| `PDF_PARSER` | `pymupdf4llm` | Parser: `pymupdf4llm` (default), `marker`, `mineru`, `docling`, `llm` |
+-| `CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
+-| `EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI embedding model |
++| `PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `unstructured` |
++| `CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
++| `EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model (use `text-embedding-3-large` for higher recall) |
 
 ## 🖥️ MCP Client Setup
 
@@ -362,8 +365,7 @@ Document Type & Priority?
 **Verification**:
 1. Reload VS Code window
 2. Check Continue panel for server connection
-3. Use `@pdfkb` in Continue chat</search>
-</search_and_replace>
+3. Use `@pdfkb` in Continue chat
 
 ### Generic MCP Client
 
@@ -576,7 +578,14 @@ uvx pdfkb-mcp[marker]     # Marker parser
 uvx pdfkb-mcp[mineru]     # MinerU parser
 uvx pdfkb-mcp[docling]    # Docling parser
 uvx pdfkb-mcp[llm]        # LLM parser
-uvx pdfkb-mcp[langchain]  # LangChain chunker
+-uvx pdfkb-mcp[langchain]  # LangChain chunker
++uvx pdfkb-mcp[unstructured_chunker]  # Unstructured chunker
+```
+
+Or via pip/pipx:
+```bash
+pip install "pdfkb-mcp[marker]"            # Marker parser
+pip install "pdfkb-mcp[docling-complete]"  # Docling with OCR and full features
 ```
 
 **Development Installation**:
@@ -594,7 +603,7 @@ pip install -e ".[dev]"
 | `OPENROUTER_API_KEY` | *optional* | Required for LLM parser |
 | `KNOWLEDGEBASE_PATH` | `./pdfs` | PDF directory path |
 | `CACHE_DIR` | `./.cache` | Cache directory |
-| `PDF_PARSER` | `marker` | PDF parser selection |
+| `PDF_PARSER` | `pymupdf4llm` | PDF parser selection |
 | `PDF_CHUNKER` | `unstructured` | Chunking strategy |
 | `CHUNK_SIZE` | `1000` | LangChain chunk size |
 | `CHUNK_OVERLAP` | `200` | LangChain chunk overlap |
@@ -622,11 +631,21 @@ pip install -e ".[dev]"
 - Header-aware splitting with [`MarkdownHeaderTextSplitter`](src/pdfkb/chunker/chunker_langchain.py)
 - Configurable via `CHUNK_SIZE` and `CHUNK_OVERLAP`
 - Best for customizable chunking
+- Default and installed with base package
 
 **Unstructured** (`PDF_CHUNKER=unstructured`):
 - Intelligent semantic chunking with [`unstructured`](src/pdfkb/chunker/chunker_unstructured.py) library
 - Zero configuration required
+- Install extra: `pip install "pdfkb-mcp[unstructured_chunker]"` to enable
 - Best for document structure awareness
+
+### First-run notes
+
+- On the first run, the server initializes caches and vector store and logs selected components:
+  - Parser: PyMuPDF4LLM (default)
+  - Chunker: LangChain (default)
+  - Embedding Model: text-embedding-3-small (default)
+- If you select a parser/chunker that isn’t installed, the server logs a warning with the exact install command and falls back to the default components instead of exiting.
 
 ### Troubleshooting Guide
 
