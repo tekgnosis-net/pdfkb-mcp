@@ -25,7 +25,7 @@ class ServerConfig:
     cache_dir: Path = field(default_factory=lambda: Path(""))
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    embedding_model: str = "text-embedding-3-small"
+    embedding_model: str = "text-embedding-3-large"
     embedding_batch_size: int = 100
     vector_search_k: int = 5
     file_scan_interval: int = 60

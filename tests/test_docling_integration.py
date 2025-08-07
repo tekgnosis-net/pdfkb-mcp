@@ -131,9 +131,10 @@ class TestDoclingIntegration:
             config = ServerConfig.from_env()
 
         # Mock docling components for testing
-        with patch("docling.document_converter.DocumentConverter") as mock_converter_class, patch(
-            "docling.datamodel.pipeline_options.PdfPipelineOptions"
-        ) as mock_options_class:
+        with (
+            patch("docling.document_converter.DocumentConverter") as mock_converter_class,
+            patch("docling.datamodel.pipeline_options.PdfPipelineOptions") as mock_options_class,
+        ):
 
             # Setup mock conversion result
             mock_result = Mock()

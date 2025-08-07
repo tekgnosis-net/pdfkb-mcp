@@ -177,9 +177,10 @@ class TestDoclingParserParsing:
         """Test successful parsing with mocked docling."""
         mock_ocr_check.return_value = True
 
-        with patch("docling.document_converter.DocumentConverter") as mock_converter_class, patch(
-            "docling.datamodel.pipeline_options.PdfPipelineOptions"
-        ) as mock_options_class:
+        with (
+            patch("docling.document_converter.DocumentConverter") as mock_converter_class,
+            patch("docling.datamodel.pipeline_options.PdfPipelineOptions") as mock_options_class,
+        ):
 
             # Setup mocks
             mock_converter = Mock()
@@ -220,8 +221,9 @@ class TestDoclingParserParsing:
         """Test handling of conversion failures."""
         mock_ocr_check.return_value = True
 
-        with patch("docling.document_converter.DocumentConverter") as mock_converter_class, patch(
-            "docling.datamodel.pipeline_options.PdfPipelineOptions"
+        with (
+            patch("docling.document_converter.DocumentConverter") as mock_converter_class,
+            patch("docling.datamodel.pipeline_options.PdfPipelineOptions"),
         ):
 
             # Mock conversion failure
@@ -239,8 +241,9 @@ class TestDoclingParserParsing:
         """Test processing timeout handling."""
         mock_ocr_check.return_value = True
 
-        with patch("docling.document_converter.DocumentConverter") as mock_converter_class, patch(
-            "docling.datamodel.pipeline_options.PdfPipelineOptions"
+        with (
+            patch("docling.document_converter.DocumentConverter") as mock_converter_class,
+            patch("docling.datamodel.pipeline_options.PdfPipelineOptions"),
         ):
 
             # Mock slow conversion using a plain async function, bound via a wrapper __get__
@@ -333,8 +336,9 @@ class TestDoclingParserCacheIntegration:
         """Test integration with base class caching."""
         mock_ocr_check.return_value = True
 
-        with patch("docling.document_converter.DocumentConverter") as mock_converter_class, patch(
-            "docling.datamodel.pipeline_options.PdfPipelineOptions"
+        with (
+            patch("docling.document_converter.DocumentConverter") as mock_converter_class,
+            patch("docling.datamodel.pipeline_options.PdfPipelineOptions"),
         ):
 
             # Setup mock result

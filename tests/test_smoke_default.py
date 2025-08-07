@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -10,8 +9,9 @@ from pdfkb.pdf_processor import PDFProcessor
 reportlab = pytest.importorskip("reportlab", reason="reportlab is required for smoke test")
 from reportlab.pdfgen import canvas  # noqa: E402
 
+pytestmark = pytest.mark.asyncio
 
-@pytest.mark.asyncio
+
 async def test_smoke_default_pipeline(tmp_path: Path):
     """
     Smoke test: default parser (PyMuPDF4LLM) + default chunker (LangChain) work OOTB.
@@ -37,7 +37,7 @@ async def test_smoke_default_pipeline(tmp_path: Path):
     # Default config should now be:
     # - PDF_PARSER = pymupdf4llm
     # - PDF_CHUNKER = langchain
-    # - EMBEDDING_MODEL = text-embedding-3-small
+    # - EMBEDDING_MODEL = text-embedding-3-large
     config = ServerConfig(
         openai_api_key="sk-test-key-smoke",  # triggers mock embeddings on API errors
         knowledgebase_path=kb_dir,

@@ -51,6 +51,10 @@ class PyMuPDF4LLMParser(PDFParser):
             # Create a copy of config and remove the keys we're handling explicitly
             config_copy = dict(self.config)
 
+            # Remove keys that we handle explicitly to avoid duplicate keyword arguments
+            config_copy.pop("page_chunks", None)
+            config_copy.pop("show_progress", None)
+
             # Use pymupdf4llm to convert PDF to markdown
             md_text = pymupdf4llm.to_markdown(
                 str(file_path),

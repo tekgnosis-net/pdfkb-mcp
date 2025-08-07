@@ -84,8 +84,8 @@ class TestIntelligentCacheManager:
         initial_chunking = self.cache_manager.get_chunking_fingerprint()
         initial_embedding = self.cache_manager.get_embedding_fingerprint()
 
-        # Change parsing config
-        self.config.pdf_parser = "pymupdf4llm"
+        # Change parsing config - use a different parser than the default
+        self.config.pdf_parser = "unstructured"  # Changed from "pymupdf4llm" to "unstructured"
         new_parsing = self.cache_manager.get_parsing_fingerprint()
         assert new_parsing != initial_parsing
 
@@ -95,7 +95,7 @@ class TestIntelligentCacheManager:
         assert new_chunking != initial_chunking
 
         # Change embedding config
-        self.config.embedding_model = "text-embedding-3-small"
+        self.config.embedding_model = "text-embedding-ada-002"  # Changed to a clearly different model
         new_embedding = self.cache_manager.get_embedding_fingerprint()
         assert new_embedding != initial_embedding
 
@@ -124,8 +124,8 @@ class TestIntelligentCacheManager:
         # Save initial fingerprints
         self.cache_manager.update_fingerprints()
 
-        # Modify parsing config
-        self.config.pdf_parser = "pymupdf4llm"
+        # Modify parsing config - use a different parser than the default
+        self.config.pdf_parser = "unstructured"  # Changed from "pymupdf4llm" to "unstructured"
 
         changes = self.cache_manager.detect_config_changes()
         assert changes["parsing"] is True

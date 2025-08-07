@@ -102,7 +102,7 @@ class PDFProcessor:
                     except ImportError:
                         raise PDFProcessingError(
                             "No PDF parser available. Install one of: "
-                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[mineru]"
+                            "pip install pymupdf4llm or pip install unstructured[pdf]"
                         )
         elif parser_type == "marker":
             try:
@@ -132,7 +132,7 @@ class PDFProcessor:
                     except ImportError:
                         raise PDFProcessingError(
                             "No PDF parser available. Install one of: "
-                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[marker]"
+                            "pip install pymupdf4llm or pip install unstructured[pdf]"
                         )
         elif parser_type == "docling":
             try:
@@ -167,7 +167,7 @@ class PDFProcessor:
                     except ImportError:
                         raise PDFProcessingError(
                             "No PDF parser available. Install one of: "
-                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[docling]"
+                            "pip install pymupdf4llm or pip install unstructured[pdf]"
                         )
         elif parser_type == "llm":
             try:
@@ -201,21 +201,23 @@ class PDFProcessor:
                     except ImportError:
                         raise PDFProcessingError(
                             "No PDF parser available. Install one of: "
-                            "pip install pymupdf4llm, pip install unstructured[pdf], or pip install pdfkb-mcp[llm]"
+                            "pip install pymupdf4llm or pip install unstructured[pdf]"
                         )
-            except ValueError as e:
-                logger.warning(f"LLM parser configuration error ({e}), falling back to Unstructured")
-                # Fallback to Unstructured if API key is missing
+        elif parser_type == "unstructured":
+            try:
+                return UnstructuredPDFParser(
+                    strategy=self.config.unstructured_pdf_processing_strategy,
+                    cache_dir=cache_dir,
+                )
+            except ImportError as e:
+                logger.warning(f"Unstructured parser not available ({e}), falling back to PyMuPDF4LLM")
+                # Try to create PyMuPDF4LLM parser as fallback
                 try:
-                    return UnstructuredPDFParser(
-                        strategy=self.config.unstructured_pdf_processing_strategy,
-                        cache_dir=cache_dir,
-                    )
+                    return PyMuPDF4LLMParser(config={"page_chunks": True, "show_progress": True}, cache_dir=cache_dir)
                 except ImportError:
                     raise PDFProcessingError(
-                        "LLM parser requires OpenRouter API key and fallback parsers are not available. "
-                        "Set OPENROUTER_API_KEY environment variable or install fallback: "
-                        "pip install unstructured[pdf]"
+                        "Neither Unstructured nor PyMuPDF4LLM libraries are available. "
+                        "Install with: pip install unstructured[pdf] or pip install pymupdf4llm"
                     )
         else:
             # Safety default: prefer PyMuPDF4LLM, then Unstructured
@@ -230,7 +232,7 @@ class PDFProcessor:
                 except ImportError:
                     raise PDFProcessingError(
                         "No PDF parser available. Install one of: pip install pymupdf4llm or "
-                        + "pip install unstructured[pdf]"
+                        "pip install unstructured[pdf]"
                     )
 
     def _create_chunker(self) -> Chunker:
@@ -239,7 +241,8 @@ class PDFProcessor:
         Returns:
             Chunker instance.
         """
-        chunker_type = getattr(self.config, "pdf_chunker", "unstructured")
+        # Get chunker type, with "langchain" as the actual default (matching config.py)
+        chunker_type = getattr(self.config, "pdf_chunker", "langchain")
 
         if chunker_type == "langchain":
             try:
@@ -257,21 +260,17 @@ class PDFProcessor:
                         "No chunker available. Install one of: "
                         "pip install pdfkb-mcp[langchain] or pip install pdfkb-mcp[unstructured_chunker]"
                     )
-        else:  # default to unstructured
+        elif chunker_type == "unstructured":
             try:
                 return ChunkerUnstructured()
             except ImportError as e:
-                logger.warning(
-                    f"Unstructured chunker not available ({e}). Falling back to LangChain chunker. "
+                # If unstructured was explicitly requested but not available, raise error
+                raise PDFProcessingError(
+                    f"Unstructured chunker not available ({e}). "
                     "To enable Unstructured, install: pip install pdfkb-mcp[unstructured_chunker]"
                 )
-                try:
-                    return LangChainChunker(chunk_size=self.config.chunk_size, chunk_overlap=self.config.chunk_overlap)
-                except ImportError:
-                    raise PDFProcessingError(
-                        "No chunker available. Install one of: "
-                        "pip install pdfkb-mcp[langchain] or pip install pdfkb-mcp[unstructured_chunker]"
-                    )
+        else:
+            raise PDFProcessingError(f"Unknown chunker type: {chunker_type}. Must be 'langchain' or 'unstructured'")
 
     def _get_document_cache_dir(self, file_path: Path) -> Path:
         """Get the cache directory for a specific document.

@@ -148,7 +148,7 @@ Document Type & Priority?
         "OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
         "PDF_PARSER": "pymupdf4llm",
         "PDF_CHUNKER": "langchain",
-        "EMBEDDING_MODEL": "text-embedding-3-small"
+        "EMBEDDING_MODEL": "text-embedding-3-large"
       },
       "transport": "stdio"
     }
@@ -221,8 +221,8 @@ Document Type & Priority?
       "args": ["pdfkb-mcp"],
       "env": {
         "OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
-        "PDF_PARSER": "docling",
-        "DOCLING_TABLE_MODE": "ACCURATE",
+        "PDF_PARSER": "pymupdf4llm",
+        "DoCLING_TABLE_MODE": "ACCURATE",
         "DOCLING_DO_TABLE_STRUCTURE": "true"
       },
       "transport": "stdio"
@@ -283,7 +283,7 @@ Document Type & Priority?
 -| `EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI embedding model |
 +| `PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `unstructured` |
 +| `CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
-+| `EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model (use `text-embedding-3-large` for higher recall) |
++| `EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI embedding model (use `text-embedding-3-small` for faster processing) |
 
 ## 🖥️ MCP Client Setup
 
@@ -307,7 +307,8 @@ Document Type & Priority?
         "CACHE_DIR": "/Users/yourname/Documents/PDFs/.cache"
       },
       "transport": "stdio",
-      "autoRestart": true
+      "autoRestart": true,
+                "EMBEDDING_MODEL": "text-embedding-3-small",
     }
   }
 }
@@ -644,7 +645,7 @@ pip install -e ".[dev]"
 - On the first run, the server initializes caches and vector store and logs selected components:
   - Parser: PyMuPDF4LLM (default)
   - Chunker: LangChain (default)
-  - Embedding Model: text-embedding-3-small (default)
+  - Embedding Model: text-embedding-3-large (default)
 - If you select a parser/chunker that isn’t installed, the server logs a warning with the exact install command and falls back to the default components instead of exiting.
 
 ### Troubleshooting Guide
