@@ -34,6 +34,8 @@ from .pdf_processor import PDFProcessor
 from .vector_store import VectorStore
 
 __all__ = [
+    # Version
+    "__version__",
     # Core server and configuration
     "PDFKnowledgebaseServer",
     "ServerConfig",

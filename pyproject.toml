@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdfkb-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A Model Context Protocol server for managing PDF documents with vector search capabilities"
 readme = "README.md"
 license = "MIT"
@@ -141,6 +141,9 @@ pdfkb-mcp = "pdfkb.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pdfkb"]
+
+[tool.hatch.version]
+path = "src/pdfkb/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
