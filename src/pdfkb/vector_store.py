@@ -329,6 +329,49 @@ class VectorStore:
             logger.error(f"Failed to get document content: {e}")
             return None
 
+    async def get_document_chunks(self, document_id: str) -> List[Chunk]:
+        """Retrieve all chunks for a document from the vector store.
+
+        Args:
+            document_id: ID of the document
+
+        Returns:
+            List of Chunk objects sorted by chunk_index
+        """
+        try:
+            if self.collection is None:
+                await self.initialize()
+
+            results = self.collection.get(
+                where={"document_id": document_id},
+                include=["documents", "metadatas"],
+            )
+
+            docs = results.get("documents") or []
+            metas = results.get("metadatas") or []
+
+            # Flatten possible nested list shapes
+            if docs and isinstance(docs[0], list):
+                docs = [d for sub in docs for d in sub]
+            if metas and isinstance(metas[0], list):
+                metas = [m for sub in metas for m in sub]
+
+            if not docs or not metas:
+                return []
+
+            chunks: List[Chunk] = []
+            for text, metadata in zip(docs, metas):
+                # Let Chunk.__post_init__ generate a deterministic ID if empty
+                chunks.append(self._chunk_from_metadata("", text, metadata))
+
+            # Sort by chunk_index for stable ordering
+            chunks.sort(key=lambda c: c.chunk_index or 0)
+            return chunks
+
+        except Exception as e:
+            logger.error(f"Failed to get chunks for document {document_id}: {e}")
+            return []
+
     async def get_document_count(self) -> int:
         """Get the total number of documents in the vector store.
 

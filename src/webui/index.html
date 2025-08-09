@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PDF Knowledgebase MCP - Semantic search and management for PDF documents">
+    <title>PDF Knowledgebase MCP</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14,2 14,8 20,8'/%3E%3Cline x1='16' y1='13' x2='8' y2='13'/%3E%3Cline x1='16' y1='17' x2='8' y2='17'/%3E%3Cpolyline points='10,9 9,9 8,9'/%3E%3C/svg%3E">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p id="loading-text">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Main Application Container -->
+    <div id="app" class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <!-- Logo and Brand -->
+                <div class="brand">
+                    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14,2 14,8 20,8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                        <polyline points="10,9 9,9 8,9"/>
+                    </svg>
+                    <h1 class="brand-text">PDF Knowledgebase MCP</h1>
+                </div>
+
+                <!-- Navigation -->
+                <nav class="nav">
+                    <button id="nav-documents" class="nav-item active" data-view="documents">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                        </svg>
+                        <span>Documents</span>
+                    </button>
+
+                    <button id="nav-search" class="nav-item" data-view="search">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="m21 21-4.35-4.35"/>
+                        </svg>
+                        <span>Search</span>
+                    </button>
+
+                    <button id="nav-upload" class="nav-item" data-view="upload">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17,8 12,3 7,8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <span>Upload</span>
+                    </button>
+                </nav>
+
+                <!-- Status Bar -->
+                <div class="status-bar">
+                    <div id="connection-status" class="status-item">
+                        <div class="status-indicator" data-status="connecting"></div>
+                        <span class="status-text">Connecting...</span>
+                    </div>
+
+                    <div id="system-stats" class="status-stats hidden">
+                        <span id="documents-count">0</span> docs •
+                        <span id="chunks-count">0</span> chunks
+                    </div>
+
+                    <!-- Theme Toggle -->
+                    <button id="theme-toggle" class="theme-toggle" title="Toggle theme">
+                        <svg class="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"/>
+                            <g stroke="currentColor">
+                                <line x1="12" y1="1" x2="12" y2="3"/>
+                                <line x1="12" y1="21" x2="12" y2="23"/>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                                <line x1="1" y1="12" x2="3" y2="12"/>
+                                <line x1="21" y1="12" x2="23" y2="12"/>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                            </g>
+                        </svg>
+                        <svg class="theme-icon-dark hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Breadcrumb Navigation -->
+            <div id="breadcrumb" class="breadcrumb hidden">
+                <button id="breadcrumb-back" class="breadcrumb-back">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15,18 9,12 15,6"/>
+                    </svg>
+                </button>
+                <div class="breadcrumb-path">
+                    <span id="breadcrumb-text"></span>
+                </div>
+            </div>
+
+            <!-- Documents View -->
+            <section id="documents-view" class="view active">
+                <!-- Documents Header -->
+                <div class="view-header">
+                    <h2 class="view-title">Document Library</h2>
+                    <div class="view-actions">
+                        <div class="search-box">
+                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/>
+                                <path d="m21 21-4.35-4.35"/>
+                            </svg>
+                            <input type="text" id="documents-search" placeholder="Filter documents..." class="search-input">
+                        </div>
+                        <button id="refresh-documents" class="btn btn-secondary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23,4 23,10 17,10"/>
+                                <polyline points="1,20 1,14 7,14"/>
+                                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                            </svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Documents List Container -->
+                <div id="documents-container" class="documents-container">
+                    <div id="documents-loading" class="loading-state">
+                        <div class="loading-spinner">
+                            <div class="spinner"></div>
+                            <p>Loading documents...</p>
+                        </div>
+                    </div>
+
+                    <div id="documents-list" class="documents-list hidden"></div>
+
+                    <div id="documents-empty" class="empty-state hidden">
+                        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                        </svg>
+                        <h3>No documents found</h3>
+                        <p>Upload your first PDF document to get started</p>
+                        <button id="upload-first-doc" class="btn btn-primary">Upload Document</button>
+                    </div>
+                </div>
+
+                <!-- Pagination -->
+                <div id="documents-pagination" class="pagination hidden">
+                    <div class="pagination-info">
+                        <span id="pagination-text">Showing 1-20 of 100</span>
+                    </div>
+                    <div class="pagination-controls">
+                        <button id="pagination-prev" class="btn btn-secondary" disabled>Previous</button>
+                        <div class="pagination-pages" id="pagination-pages"></div>
+                        <button id="pagination-next" class="btn btn-secondary">Next</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Search View -->
+            <section id="search-view" class="view">
+                <div class="view-header">
+                    <h2 class="view-title">Search Documents</h2>
+                </div>
+
+                <!-- Search Interface -->
+                <div class="search-interface">
+                    <div class="search-form">
+                        <div class="search-input-container">
+                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/>
+                                <path d="m21 21-4.35-4.35"/>
+                            </svg>
+                            <input type="text" id="search-input" placeholder="Search documents..." class="search-input large">
+                            <button id="search-button" class="btn btn-primary">Search</button>
+                        </div>
+
+                        <div class="search-options">
+                            <div class="search-option">
+                                <label for="search-limit">Results:</label>
+                                <select id="search-limit" class="select">
+                                    <option value="5">5</option>
+                                    <option value="10" selected>10</option>
+                                    <option value="25">25</option>
+                                    <option value="50">50</option>
+                                </select>
+                            </div>
+
+                            <div class="search-option">
+                                <label for="min-score">Min Score:</label>
+                                <input type="range" id="min-score" min="0" max="1" step="0.1" value="0" class="range">
+                                <span id="min-score-value">0.0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Search Results -->
+                    <div id="search-results-container" class="search-results-container">
+                        <div id="search-results-loading" class="loading-state hidden">
+                            <div class="loading-spinner">
+                                <div class="spinner"></div>
+                                <p>Searching...</p>
+                            </div>
+                        </div>
+
+                        <div id="search-results" class="search-results hidden"></div>
+
+                        <div id="search-empty" class="empty-state hidden">
+                            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/>
+                                <path d="m21 21-4.35-4.35"/>
+                            </svg>
+                            <h3>No results found</h3>
+                            <p>Try different keywords or adjust your search criteria</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Upload View -->
+            <section id="upload-view" class="view">
+                <div class="view-header">
+                    <h2 class="view-title">Upload Documents</h2>
+                </div>
+
+                <!-- File Upload -->
+                <div class="upload-interface">
+                    <!-- Drag & Drop Area -->
+                    <div id="drop-zone" class="drop-zone">
+                        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17,8 12,3 7,8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <h3>Drop PDF files here</h3>
+                        <p>or <button id="file-select" class="link-button">browse to select files</button></p>
+                        <input type="file" id="file-input" accept=".pdf" multiple hidden>
+                    </div>
+
+                    <!-- Add by Path -->
+                    <div class="upload-section">
+                        <h3>Add by File Path</h3>
+                        <div class="path-input-container">
+                            <input type="text" id="path-input" placeholder="/path/to/document.pdf" class="path-input">
+                            <button id="add-path-button" class="btn btn-secondary">Add Path</button>
+                        </div>
+                    </div>
+
+                    <!-- Upload Queue -->
+                    <div id="upload-queue" class="upload-queue hidden">
+                        <h3>Upload Queue</h3>
+                        <div id="upload-list" class="upload-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Document Detail View -->
+            <section id="document-detail-view" class="view">
+                <div id="document-detail-container">
+                    <!-- Document detail content will be loaded here -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="confirm-title">Confirm Action</h3>
+                <button id="modal-close" class="modal-close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-message">Are you sure?</p>
+            </div>
+            <div class="modal-footer">
+                <button id="confirm-cancel" class="btn btn-secondary">Cancel</button>
+                <button id="confirm-ok" class="btn btn-danger">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="performance.js"></script>
+    <script src="app.js"></script>
+    <script src="components/DocumentList.js"></script>
+    <script src="components/DocumentDetail.js"></script>
+    <script src="components/SearchInterface.js"></script>
+    <script src="components/StatusBar.js"></script>
+    <script src="components/FileUpload.js"></script>
+</body>
+</html>

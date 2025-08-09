@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from fastmcp import FastMCP
 
@@ -25,17 +25,23 @@ from .models import Document, SearchQuery
 from .pdf_processor import PDFProcessor
 from .vector_store import VectorStore
 
+if TYPE_CHECKING:
+    from .background_queue import BackgroundProcessingQueue
+
 logger = logging.getLogger(__name__)
 
 
 class PDFKnowledgebaseServer:
     """Main MCP server implementation for PDF knowledgebase management."""
 
-    def __init__(self, config: Optional[ServerConfig] = None):
+    def __init__(
+        self, config: Optional[ServerConfig] = None, background_queue: Optional["BackgroundProcessingQueue"] = None
+    ):
         """Initialize the PDF knowledgebase server.
 
         Args:
             config: Server configuration. If None, loads from environment.
+            background_queue: Optional background processing queue for non-blocking operations.
         """
         self.config = config or ServerConfig.from_env()
         self.app = FastMCP("PDF Knowledgebase")
@@ -44,6 +50,8 @@ class PDFKnowledgebaseServer:
         self.embedding_service: Optional[EmbeddingService] = None
         self.file_monitor: Optional[FileMonitor] = None
         self.cache_manager: Optional[IntelligentCacheManager] = None
+        self.background_queue = background_queue
+        self._web_document_service = None  # Optional reference to web document service
 
         # Document metadata cache
         self._document_cache: Dict[str, Document] = {}
@@ -52,10 +60,10 @@ class PDFKnowledgebaseServer:
         self._setup_tools()
         self._setup_resources()
 
-    async def initialize(self) -> None:
-        """Initialize all components asynchronously."""
+    async def initialize_core(self) -> None:
+        """Initialize core components (excluding FileMonitor) asynchronously."""
         try:
-            logger.info("Initializing PDF Knowledgebase server...")
+            logger.info("Initializing PDF Knowledgebase server core components...")
 
             # Initialize cache manager
             self.cache_manager = IntelligentCacheManager(self.config, self.config.cache_dir)
@@ -95,22 +103,54 @@ class PDFKnowledgebaseServer:
             # Handle re-processing of cached documents after components are initialized
             await self._handle_post_initialization_reprocessing()
 
-            self.file_monitor = FileMonitor(
-                self.config, self.pdf_processor, self.vector_store, self._update_document_cache
-            )
-            await self.file_monitor.start_monitoring()
-
             # Load document metadata cache
             await self._load_document_cache()
 
             # Update intelligent cache fingerprints
             self.cache_manager.update_fingerprints()
 
-            logger.info("PDF Knowledgebase server initialized successfully")
+            logger.info("PDF Knowledgebase server core components initialized successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize server: {e}")
-            raise ConfigurationError(f"Server initialization failed: {e}")
+            logger.error(f"Failed to initialize core components: {e}")
+            raise ConfigurationError(f"Core initialization failed: {e}")
+
+    async def initialize_file_monitor(self, web_document_service=None) -> None:
+        """Initialize file monitor with optional web document service.
+
+        Args:
+            web_document_service: Optional web document service for in-progress tracking
+        """
+        try:
+            logger.info("Initializing file monitor...")
+
+            # Store web document service reference
+            self._web_document_service = web_document_service
+
+            self.file_monitor = FileMonitor(
+                self.config,
+                self.pdf_processor,
+                self.vector_store,
+                self._update_document_cache,
+                background_queue=self.background_queue,
+                web_document_service=self._web_document_service,
+            )
+            await self.file_monitor.start_monitoring()
+
+            logger.info("File monitor initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize file monitor: {e}")
+            raise ConfigurationError(f"File monitor initialization failed: {e}")
+
+    async def initialize(self, web_document_service=None) -> None:
+        """Initialize all components asynchronously.
+
+        Args:
+            web_document_service: Optional web document service for in-progress tracking
+        """
+        await self.initialize_core()
+        await self.initialize_file_monitor(web_document_service)
 
     async def _handle_intelligent_config_changes(self) -> None:
         """Handle configuration changes using intelligent cache management for selective invalidation."""
@@ -299,14 +339,19 @@ class PDFKnowledgebaseServer:
 
         @self.app.tool()
         async def add_document(path: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-            """Add a PDF document to the knowledgebase.
+            """Add a PDF document to the knowledgebase for searching and analysis.
+
+            Use this tool to ingest new PDF documents. Once added, the document content
+            will be automatically processed, chunked, and made searchable via search_documents.
+            You do not need to call any other tools after adding - the document becomes
+            immediately available for searching.
 
             Args:
-                path: Path to the PDF file to add.
-                metadata: Optional metadata to associate with the document.
+                path: Path to the PDF file to add to the knowledgebase.
+                metadata: Optional metadata to associate with the document (e.g., tags, categories).
 
             Returns:
-                Processing result with document information or error details.
+                Processing result with document information, success status, and processing time.
             """
             try:
                 # Validate input
@@ -369,15 +414,20 @@ class PDFKnowledgebaseServer:
         async def search_documents(
             query: str, limit: int = 5, metadata_filter: Optional[Dict[str, Any]] = None
         ) -> Dict[str, Any]:
-            """Search for relevant content across all PDFs.
+            """Search for relevant content across the entire PDF knowledgebase.
+
+            This is the primary tool for finding information. It automatically searches through
+            all documents in the knowledgebase using semantic similarity - you do NOT need to
+            call list_documents first to know what documents are available. Simply provide your
+            search query and this tool will find the most relevant content across all PDFs.
 
             Args:
-                query: Search query text.
-                limit: Maximum number of results to return.
-                metadata_filter: Optional metadata filters to apply.
+                query: Search query text describing what you're looking for.
+                limit: Maximum number of results to return (default: 5).
+                metadata_filter: Optional metadata filters to apply to narrow results.
 
             Returns:
-                Search results with document chunks and metadata.
+                Search results with relevant document chunks, similarity scores, and metadata.
             """
             try:
                 # Validate input
@@ -437,13 +487,21 @@ class PDFKnowledgebaseServer:
         async def list_documents(
             metadata_filter: Optional[Dict[str, Any]] = None,
         ) -> Dict[str, Any]:
-            """List all documents in the knowledgebase.
+            """List all documents in the knowledgebase for management and browsing purposes.
+
+            Use this tool ONLY when you need to:
+            - Browse available documents and their metadata
+            - Get document management information (file sizes, page counts, etc.)
+            - Remove or manage specific documents by ID
+
+            DO NOT use this tool before searching - use search_documents directly instead,
+            as it automatically searches across all documents without requiring a list first.
 
             Args:
                 metadata_filter: Optional metadata filters to apply.
 
             Returns:
-                List of document metadata and statistics.
+                List of document metadata and statistics (titles, paths, page counts, etc.).
             """
             try:
                 logger.info("Listing documents")
@@ -497,15 +555,63 @@ class PDFKnowledgebaseServer:
                 logger.error(f"Error listing documents: {e}")
                 return {"success": False, "error": f"Error listing documents: {e}"}
 
-        @self.app.tool()
-        async def remove_document(document_id: str) -> Dict[str, Any]:
-            """Remove a document from the knowledgebase.
+        def _is_file_watcher_managed_document(self, document: Document) -> bool:
+            """Check if a document is managed by the file watcher (exists in knowledgebase directory).
 
             Args:
-                document_id: ID of the document to remove.
+                document: Document to check
 
             Returns:
-                Removal confirmation or error details.
+                True if the document is managed by file watcher and should not be removed via API
+            """
+            try:
+                if not document.path:
+                    return False
+
+                doc_path = Path(document.path).resolve()
+                kb_path = self.config.knowledgebase_path.resolve()
+                uploads_path = (kb_path / "uploads").resolve()
+
+                # Check if document is within knowledgebase directory
+                try:
+                    doc_path.relative_to(kb_path)
+                except ValueError:
+                    # Document path is not within knowledgebase directory
+                    return False
+
+                # Check if document is NOT in uploads directory (uploads are user-managed)
+                try:
+                    doc_path.relative_to(uploads_path)
+                    # Document is in uploads directory, so it's user-managed
+                    return False
+                except ValueError:
+                    # Document is not in uploads, so it could be file-watcher-managed
+                    pass
+
+                # Check if the original file still exists
+                if doc_path.exists():
+                    return True
+
+                return False
+
+            except Exception as e:
+                logger.error(f"Error checking if document is file-watcher-managed: {e}")
+                return False
+
+        @self.app.tool()
+        async def remove_document(document_id: str) -> Dict[str, Any]:
+            """Remove a specific document from the knowledgebase.
+
+            Use this tool to permanently delete a document and all its associated data.
+            If you need to find the document ID first, use list_documents to browse
+            available documents and get their IDs. The document will be completely
+            removed from search results after deletion.
+
+            Args:
+                document_id: Unique ID of the document to remove (get this from list_documents).
+
+            Returns:
+                Removal confirmation with document details or error information.
             """
             try:
                 # Validate input
@@ -518,13 +624,50 @@ class PDFKnowledgebaseServer:
                 if document_id not in self._document_cache:
                     raise DocumentNotFoundError(document_id)
 
+                document = self._document_cache[document_id]
+
+                # Check if document is managed by file watcher
+                if self._is_file_watcher_managed_document(document):
+                    error_msg = (
+                        f"Cannot remove document '{document.filename or document_id}' as it exists in the "
+                        f"knowledgebase directory ({document.path}). To remove this document, delete the "
+                        f"file from the filesystem directly."
+                    )
+                    logger.warning(f"Attempted to remove file-watcher-managed document: {document_id}")
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "error_type": "file_watcher_managed",
+                        "document_path": document.path,
+                    }
+
                 logger.info(f"Removing document: {document_id}")
                 start_time = time.time()
 
-                document = self._document_cache[document_id]
-
                 # Remove from vector store
                 await self.vector_store.delete_document(document_id)
+
+                # For user-uploaded documents, also remove the physical file
+                document_path = document.path
+                try:
+                    file_path = Path(document_path)
+                    uploads_dir = self.config.knowledgebase_path / "uploads"
+
+                    # Check if this is an uploaded file (in uploads directory)
+                    try:
+                        file_path.relative_to(uploads_dir)
+                        # It's in uploads directory, safe to delete
+                        if file_path.exists():
+                            file_path.unlink()
+                            logger.info(f"Deleted uploaded file: {file_path}")
+                        else:
+                            logger.warning(f"Uploaded file not found for deletion: {file_path}")
+                    except ValueError:
+                        # File is not in uploads directory, don't delete it
+                        logger.debug(f"Document file not in uploads directory, preserving: {file_path}")
+
+                except Exception as e:
+                    logger.warning(f"Failed to delete uploaded file {document_path}: {e}")
 
                 # Remove from document cache
                 del self._document_cache[document_id]
@@ -823,23 +966,87 @@ class PDFKnowledgebaseServer:
 
 def main():
     """Entry point for the MCP server."""
+    import argparse
     import sys
 
-    # Load configuration to get log level
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="PDF Knowledgebase MCP Server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Environment Variables:
+  OPENAI_API_KEY          OpenAI API key (required)
+  KNOWLEDGEBASE_PATH      Path to PDF directory (default: ./pdfs)
+  CACHE_DIR              Cache directory (default: <KNOWLEDGEBASE_PATH>/.cache)
+  PDFKB_ENABLE_WEB       Enable web interface (1/true/yes to enable, default: true)
+  WEB_PORT               Web server port (default: 8080)
+  WEB_HOST               Web server host (default: localhost)
+  PDF_PARSER             PDF parser to use (default: pymupdf4llm)
+  PDF_CHUNKER            Text chunker to use (default: langchain)
+  LOG_LEVEL              Logging level (default: INFO)
+
+Examples:
+  pdfkb-mcp                          # Run with default settings (MCP + Web if PDFKB_ENABLE_WEB=true)
+  PDFKB_ENABLE_WEB=false pdfkb-mcp   # Run MCP server only
+  PDFKB_ENABLE_WEB=true pdfkb-mcp    # Run MCP server with web interface
+  pdfkb-mcp --config myconfig.env    # Use custom config file
+        """,
+    )
+
+    parser.add_argument("--config", type=str, help="Path to environment configuration file")
+
+    parser.add_argument("--port", type=int, help="Override MCP server port (for stdio mode, this has no effect)")
+
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Override logging level")
+
+    parser.add_argument("--version", action="version", version=f'pdfkb-mcp {__import__("pdfkb").__version__}')
+
+    args = parser.parse_args()
+
+    # Load configuration from custom file if specified
+    if args.config:
+        from dotenv import load_dotenv
+
+        load_dotenv(args.config, override=True)
+        logger.info(f"Loaded configuration from: {args.config}")
+
+    # Load main configuration
     config = ServerConfig.from_env()
+
+    # Override log level if specified
+    if args.log_level:
+        config.log_level = args.log_level
 
     # Configure logging with the configured level
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-    # Create and run server
-    server = PDFKnowledgebaseServer(config)
+    logger.info("Starting PDF Knowledgebase MCP Server")
+    logger.info(f"Version: {__import__('pdfkb').__version__}")
+    logger.info(f"Configuration: {config.knowledgebase_path}")
+    logger.info(f"Cache directory: {config.cache_dir}")
+    logger.info(f"Web interface: {'enabled' if config.web_enabled else 'disabled'}")
 
     try:
-        asyncio.run(server.run())
+        if config.web_enabled:
+            # Run integrated server (MCP + Web)
+            logger.info("Running in integrated mode (MCP + Web)")
+            if config.web_enabled:
+                logger.info(f"Web interface will be available at: http://{config.web_host}:{config.web_port}")
+                logger.info(f"API documentation will be available at: http://{config.web_host}:{config.web_port}/docs")
+
+            # Import here to avoid circular imports and ensure web dependencies are only required when needed
+            from .web_server import IntegratedPDFKnowledgebaseServer
+
+            integrated_server = IntegratedPDFKnowledgebaseServer(config)
+            asyncio.run(integrated_server.run_integrated())
+        else:
+            # Run MCP server only
+            logger.info("Running in MCP-only mode")
+            server = PDFKnowledgebaseServer(config)
+            asyncio.run(server.run())
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
-        asyncio.run(server.shutdown())
     except Exception as e:
         logger.error(f"Server error: {e}")
         sys.exit(1)

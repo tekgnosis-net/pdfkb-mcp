@@ -43,6 +43,11 @@ class ServerConfig:
     mineru_lang: str = "en"
     mineru_method: str = "auto"
     mineru_vram: int = 16
+    # Web server configuration
+    web_enabled: bool = True
+    web_port: int = 8080
+    web_host: str = "localhost"
+    web_cors_origins: List[str] = field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"])
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -97,6 +102,13 @@ class ServerConfig:
         if self.pdf_chunker not in ["langchain", "unstructured"]:
             raise ConfigurationError("pdf_chunker must be either 'langchain' or 'unstructured'")
 
+        # Validate web server configuration
+        if self.web_port <= 0 or self.web_port > 65535:
+            raise ConfigurationError("web_port must be between 1 and 65535")
+
+        if not self.web_host:
+            raise ConfigurationError("web_host cannot be empty")
+
     def _ensure_directories(self) -> None:
         """Ensure required directories exist."""
         try:
@@ -139,10 +151,12 @@ class ServerConfig:
             load_dotenv(env_file, override=False)  # Don't override existing env vars
             logger.info(f"Loaded environment variables from: {env_file}")
 
-        # Get required settings
-        openai_api_key = os.getenv("OPENAI_API_KEY")
+        # Get required settings with PDFKB_ prefix support
+        openai_api_key = os.getenv("PDFKB_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if os.getenv("OPENAI_API_KEY") and not os.getenv("PDFKB_OPENAI_API_KEY"):
+            logger.warning("OPENAI_API_KEY is deprecated, use PDFKB_OPENAI_API_KEY instead")
         if not openai_api_key:
-            raise ConfigurationError("OPENAI_API_KEY environment variable is required")
+            raise ConfigurationError("PDFKB_OPENAI_API_KEY environment variable is required")
 
         # Get optional settings with defaults
         config_kwargs = {
@@ -150,72 +164,118 @@ class ServerConfig:
         }
 
         # Parse optional path settings
-        if knowledgebase_path := os.getenv("KNOWLEDGEBASE_PATH"):
+        knowledgebase_path = os.getenv("PDFKB_KNOWLEDGEBASE_PATH") or os.getenv("KNOWLEDGEBASE_PATH")
+        if os.getenv("KNOWLEDGEBASE_PATH") and not os.getenv("PDFKB_KNOWLEDGEBASE_PATH"):
+            logger.warning("KNOWLEDGEBASE_PATH is deprecated, use PDFKB_KNOWLEDGEBASE_PATH instead")
+        if knowledgebase_path:
             config_kwargs["knowledgebase_path"] = Path(knowledgebase_path)
 
-        if cache_dir := os.getenv("CACHE_DIR"):
+        cache_dir = os.getenv("PDFKB_CACHE_DIR") or os.getenv("CACHE_DIR")
+        if os.getenv("CACHE_DIR") and not os.getenv("PDFKB_CACHE_DIR"):
+            logger.warning("CACHE_DIR is deprecated, use PDFKB_CACHE_DIR instead")
+        if cache_dir:
             config_kwargs["cache_dir"] = Path(cache_dir)
 
         # Parse optional integer settings
-        if chunk_size := os.getenv("CHUNK_SIZE"):
+        chunk_size = os.getenv("PDFKB_CHUNK_SIZE") or os.getenv("CHUNK_SIZE")
+        if os.getenv("CHUNK_SIZE") and not os.getenv("PDFKB_CHUNK_SIZE"):
+            logger.warning("CHUNK_SIZE is deprecated, use PDFKB_CHUNK_SIZE instead")
+        if chunk_size:
             try:
                 config_kwargs["chunk_size"] = int(chunk_size)
             except ValueError:
-                raise ConfigurationError(f"Invalid CHUNK_SIZE: {chunk_size}")
+                raise ConfigurationError(f"Invalid PDFKB_CHUNK_SIZE: {chunk_size}")
 
-        if chunk_overlap := os.getenv("CHUNK_OVERLAP"):
+        chunk_overlap = os.getenv("PDFKB_CHUNK_OVERLAP") or os.getenv("CHUNK_OVERLAP")
+        if os.getenv("CHUNK_OVERLAP") and not os.getenv("PDFKB_CHUNK_OVERLAP"):
+            logger.warning("CHUNK_OVERLAP is deprecated, use PDFKB_CHUNK_OVERLAP instead")
+        if chunk_overlap:
             try:
                 config_kwargs["chunk_overlap"] = int(chunk_overlap)
             except ValueError:
-                raise ConfigurationError(f"Invalid CHUNK_OVERLAP: {chunk_overlap}")
+                raise ConfigurationError(f"Invalid PDFKB_CHUNK_OVERLAP: {chunk_overlap}")
 
-        if embedding_batch_size := os.getenv("EMBEDDING_BATCH_SIZE"):
+        embedding_batch_size = os.getenv("PDFKB_EMBEDDING_BATCH_SIZE") or os.getenv("EMBEDDING_BATCH_SIZE")
+        if os.getenv("EMBEDDING_BATCH_SIZE") and not os.getenv("PDFKB_EMBEDDING_BATCH_SIZE"):
+            logger.warning("EMBEDDING_BATCH_SIZE is deprecated, use PDFKB_EMBEDDING_BATCH_SIZE instead")
+        if embedding_batch_size:
             try:
                 config_kwargs["embedding_batch_size"] = int(embedding_batch_size)
             except ValueError:
-                raise ConfigurationError(f"Invalid EMBEDDING_BATCH_SIZE: {embedding_batch_size}")
+                raise ConfigurationError(f"Invalid PDFKB_EMBEDDING_BATCH_SIZE: {embedding_batch_size}")
 
-        if vector_search_k := os.getenv("VECTOR_SEARCH_K"):
+        vector_search_k = os.getenv("PDFKB_VECTOR_SEARCH_K") or os.getenv("VECTOR_SEARCH_K")
+        if os.getenv("VECTOR_SEARCH_K") and not os.getenv("PDFKB_VECTOR_SEARCH_K"):
+            logger.warning("VECTOR_SEARCH_K is deprecated, use PDFKB_VECTOR_SEARCH_K instead")
+        if vector_search_k:
             try:
                 config_kwargs["vector_search_k"] = int(vector_search_k)
             except ValueError:
-                raise ConfigurationError(f"Invalid VECTOR_SEARCH_K: {vector_search_k}")
+                raise ConfigurationError(f"Invalid PDFKB_VECTOR_SEARCH_K: {vector_search_k}")
 
-        if file_scan_interval := os.getenv("FILE_SCAN_INTERVAL"):
+        file_scan_interval = os.getenv("PDFKB_FILE_SCAN_INTERVAL") or os.getenv("FILE_SCAN_INTERVAL")
+        if os.getenv("FILE_SCAN_INTERVAL") and not os.getenv("PDFKB_FILE_SCAN_INTERVAL"):
+            logger.warning("FILE_SCAN_INTERVAL is deprecated, use PDFKB_FILE_SCAN_INTERVAL instead")
+        if file_scan_interval:
             try:
                 config_kwargs["file_scan_interval"] = int(file_scan_interval)
             except ValueError:
-                raise ConfigurationError(f"Invalid FILE_SCAN_INTERVAL: {file_scan_interval}")
+                raise ConfigurationError(f"Invalid PDFKB_FILE_SCAN_INTERVAL: {file_scan_interval}")
 
         # Parse optional string settings
-        if embedding_model := os.getenv("EMBEDDING_MODEL"):
+        embedding_model = os.getenv("PDFKB_EMBEDDING_MODEL") or os.getenv("EMBEDDING_MODEL")
+        if os.getenv("EMBEDDING_MODEL") and not os.getenv("PDFKB_EMBEDDING_MODEL"):
+            logger.warning("EMBEDDING_MODEL is deprecated, use PDFKB_EMBEDDING_MODEL instead")
+        if embedding_model:
             config_kwargs["embedding_model"] = embedding_model
 
-        if log_level := os.getenv("LOG_LEVEL"):
+        log_level = os.getenv("PDFKB_LOG_LEVEL") or os.getenv("LOG_LEVEL")
+        if os.getenv("LOG_LEVEL") and not os.getenv("PDFKB_LOG_LEVEL"):
+            logger.warning("LOG_LEVEL is deprecated, use PDFKB_LOG_LEVEL instead")
+        if log_level:
             config_kwargs["log_level"] = log_level.upper()
 
         # Parse PDF processing strategy (backward compatibility)
-        if pdf_strategy := os.getenv("PDF_PROCESSING_STRATEGY"):
+        pdf_strategy = os.getenv("PDFKB_PDF_PROCESSING_STRATEGY") or os.getenv("PDF_PROCESSING_STRATEGY")
+        if os.getenv("PDF_PROCESSING_STRATEGY") and not os.getenv("PDFKB_PDF_PROCESSING_STRATEGY"):
+            logger.warning("PDF_PROCESSING_STRATEGY is deprecated, use PDFKB_PDF_PROCESSING_STRATEGY instead")
+        if pdf_strategy:
             strategy = pdf_strategy.lower()
             if strategy not in ["fast", "hi_res"]:
-                raise ConfigurationError(f"Invalid PDF_PROCESSING_STRATEGY: {pdf_strategy}. Must be 'fast' or 'hi_res'")
+                raise ConfigurationError(
+                    f"Invalid PDFKB_PDF_PROCESSING_STRATEGY: {pdf_strategy}. Must be 'fast' or 'hi_res'"
+                )
             config_kwargs["unstructured_pdf_processing_strategy"] = strategy
 
         # Parse Unstructured PDF processing strategy
-        if unstructured_strategy := os.getenv("UNSTRUCTURED_PDF_PROCESSING_STRATEGY"):
+        unstructured_strategy = os.getenv("PDFKB_UNSTRUCTURED_PDF_PROCESSING_STRATEGY") or os.getenv(
+            "UNSTRUCTURED_PDF_PROCESSING_STRATEGY"
+        )
+        if os.getenv("UNSTRUCTURED_PDF_PROCESSING_STRATEGY") and not os.getenv(
+            "PDFKB_UNSTRUCTURED_PDF_PROCESSING_STRATEGY"
+        ):
+            logger.warning(
+                "UNSTRUCTURED_PDF_PROCESSING_STRATEGY is deprecated, "
+                "use PDFKB_UNSTRUCTURED_PDF_PROCESSING_STRATEGY instead"
+            )
+        if unstructured_strategy:
             strategy = unstructured_strategy.lower()
             if strategy not in ["fast", "hi_res"]:
                 raise ConfigurationError(
-                    f"Invalid UNSTRUCTURED_PDF_PROCESSING_STRATEGY: {unstructured_strategy}. Must be 'fast' or 'hi_res'"
+                    f"Invalid PDFKB_UNSTRUCTURED_PDF_PROCESSING_STRATEGY: {unstructured_strategy}. "
+                    f"Must be 'fast' or 'hi_res'"
                 )
             config_kwargs["unstructured_pdf_processing_strategy"] = strategy
 
         # Parse PDF parser selection
-        if pdf_parser := os.getenv("PDF_PARSER"):
+        pdf_parser = os.getenv("PDFKB_PDF_PARSER") or os.getenv("PDF_PARSER")
+        if os.getenv("PDF_PARSER") and not os.getenv("PDFKB_PDF_PARSER"):
+            logger.warning("PDF_PARSER is deprecated, use PDFKB_PDF_PARSER instead")
+        if pdf_parser:
             parser = pdf_parser.lower()
             if parser not in ["unstructured", "pymupdf4llm", "mineru", "marker", "docling", "llm"]:
                 raise ConfigurationError(
-                    f"Invalid PDF_PARSER: {pdf_parser}. Must be 'unstructured', 'pymupdf4llm', "
+                    f"Invalid PDFKB_PDF_PARSER: {pdf_parser}. Must be 'unstructured', 'pymupdf4llm', "
                     "'mineru', 'marker', 'docling', or 'llm'"
                 )
             config_kwargs["pdf_parser"] = parser
@@ -223,74 +283,145 @@ class ServerConfig:
         # Parse docling-specific environment variables
         docling_config = {}
 
-        if docling_ocr_engine := os.getenv("DOCLING_OCR_ENGINE"):
+        docling_ocr_engine = os.getenv("PDFKB_DOCLING_OCR_ENGINE") or os.getenv("DOCLING_OCR_ENGINE")
+        if os.getenv("DOCLING_OCR_ENGINE") and not os.getenv("PDFKB_DOCLING_OCR_ENGINE"):
+            logger.warning("DOCLING_OCR_ENGINE is deprecated, use PDFKB_DOCLING_OCR_ENGINE instead")
+        if docling_ocr_engine:
             docling_config["ocr_engine"] = docling_ocr_engine.lower()
 
-        if docling_ocr_languages := os.getenv("DOCLING_OCR_LANGUAGES"):
+        docling_ocr_languages = os.getenv("PDFKB_DOCLING_OCR_LANGUAGES") or os.getenv("DOCLING_OCR_LANGUAGES")
+        if os.getenv("DOCLING_OCR_LANGUAGES") and not os.getenv("PDFKB_DOCLING_OCR_LANGUAGES"):
+            logger.warning("DOCLING_OCR_LANGUAGES is deprecated, use PDFKB_DOCLING_OCR_LANGUAGES instead")
+        if docling_ocr_languages:
             docling_config["ocr_languages"] = [lang.strip() for lang in docling_ocr_languages.split(",")]
 
-        if docling_table_mode := os.getenv("DOCLING_TABLE_MODE"):
+        docling_table_mode = os.getenv("PDFKB_DOCLING_TABLE_MODE") or os.getenv("DOCLING_TABLE_MODE")
+        if os.getenv("DOCLING_TABLE_MODE") and not os.getenv("PDFKB_DOCLING_TABLE_MODE"):
+            logger.warning("DOCLING_TABLE_MODE is deprecated, use PDFKB_DOCLING_TABLE_MODE instead")
+        if docling_table_mode:
             table_mode = docling_table_mode.upper()
             if table_mode in ["FAST", "ACCURATE"]:
                 docling_config["table_processing_mode"] = table_mode
 
-        if docling_formula_enrichment := os.getenv("DOCLING_FORMULA_ENRICHMENT"):
+        docling_formula_enrichment = os.getenv("PDFKB_DOCLING_FORMULA_ENRICHMENT") or os.getenv(
+            "DOCLING_FORMULA_ENRICHMENT"
+        )
+        if os.getenv("DOCLING_FORMULA_ENRICHMENT") and not os.getenv("PDFKB_DOCLING_FORMULA_ENRICHMENT"):
+            logger.warning("DOCLING_FORMULA_ENRICHMENT is deprecated, use PDFKB_DOCLING_FORMULA_ENRICHMENT instead")
+        if docling_formula_enrichment:
             docling_config["formula_enrichment"] = docling_formula_enrichment.lower() in [
                 "true",
                 "1",
                 "yes",
             ]
 
-        if docling_timeout := os.getenv("DOCLING_PROCESSING_TIMEOUT"):
+        docling_timeout = os.getenv("PDFKB_DOCLING_PROCESSING_TIMEOUT") or os.getenv("DOCLING_PROCESSING_TIMEOUT")
+        if os.getenv("DOCLING_PROCESSING_TIMEOUT") and not os.getenv("PDFKB_DOCLING_PROCESSING_TIMEOUT"):
+            logger.warning("DOCLING_PROCESSING_TIMEOUT is deprecated, use PDFKB_DOCLING_PROCESSING_TIMEOUT instead")
+        if docling_timeout:
             try:
                 docling_config["processing_timeout"] = int(docling_timeout)
             except ValueError:
-                raise ConfigurationError(f"Invalid DOCLING_PROCESSING_TIMEOUT: {docling_timeout}")
+                raise ConfigurationError(f"Invalid PDFKB_DOCLING_PROCESSING_TIMEOUT: {docling_timeout}")
 
-        if docling_device := os.getenv("DOCLING_DEVICE"):
+        docling_device = os.getenv("PDFKB_DOCLING_DEVICE") or os.getenv("DOCLING_DEVICE")
+        if os.getenv("DOCLING_DEVICE") and not os.getenv("PDFKB_DOCLING_DEVICE"):
+            logger.warning("DOCLING_DEVICE is deprecated, use PDFKB_DOCLING_DEVICE instead")
+        if docling_device:
             device = docling_device.lower()
             if device in ["auto", "cpu", "cuda", "mps"]:
                 docling_config["device_selection"] = device
 
-        if docling_max_pages := os.getenv("DOCLING_MAX_PAGES"):
+        docling_max_pages = os.getenv("PDFKB_DOCLING_MAX_PAGES") or os.getenv("DOCLING_MAX_PAGES")
+        if os.getenv("DOCLING_MAX_PAGES") and not os.getenv("PDFKB_DOCLING_MAX_PAGES"):
+            logger.warning("DOCLING_MAX_PAGES is deprecated, use PDFKB_DOCLING_MAX_PAGES instead")
+        if docling_max_pages:
             try:
                 docling_config["max_pages"] = int(docling_max_pages)
             except ValueError:
-                raise ConfigurationError(f"Invalid DOCLING_MAX_PAGES: {docling_max_pages}")
+                raise ConfigurationError(f"Invalid PDFKB_DOCLING_MAX_PAGES: {docling_max_pages}")
 
         # Store docling config for parser initialization
         if docling_config:
             config_kwargs["docling_config"] = docling_config
 
         # Parse Marker LLM configuration
-        if marker_use_llm := os.getenv("MARKER_USE_LLM"):
+        marker_use_llm = os.getenv("PDFKB_MARKER_USE_LLM") or os.getenv("MARKER_USE_LLM")
+        if os.getenv("MARKER_USE_LLM") and not os.getenv("PDFKB_MARKER_USE_LLM"):
+            logger.warning("MARKER_USE_LLM is deprecated, use PDFKB_MARKER_USE_LLM instead")
+        if marker_use_llm:
             config_kwargs["marker_use_llm"] = marker_use_llm.lower() in ["true", "1", "yes"]
 
-        if marker_llm_model := os.getenv("MARKER_LLM_MODEL"):
+        marker_llm_model = os.getenv("PDFKB_MARKER_LLM_MODEL") or os.getenv("MARKER_LLM_MODEL")
+        if os.getenv("MARKER_LLM_MODEL") and not os.getenv("PDFKB_MARKER_LLM_MODEL"):
+            logger.warning("MARKER_LLM_MODEL is deprecated, use PDFKB_MARKER_LLM_MODEL instead")
+        if marker_llm_model:
             config_kwargs["marker_llm_model"] = marker_llm_model
 
-        if openrouter_api_key := os.getenv("OPENROUTER_API_KEY"):
+        openrouter_api_key = os.getenv("PDFKB_OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+        if os.getenv("OPENROUTER_API_KEY") and not os.getenv("PDFKB_OPENROUTER_API_KEY"):
+            logger.warning("OPENROUTER_API_KEY is deprecated, use PDFKB_OPENROUTER_API_KEY instead")
+        if openrouter_api_key:
             config_kwargs["openrouter_api_key"] = openrouter_api_key
 
         # Parse MinerU configuration
-        if mineru_lang := os.getenv("MINERU_LANG"):
+        mineru_lang = os.getenv("PDFKB_MINERU_LANG") or os.getenv("MINERU_LANG")
+        if os.getenv("MINERU_LANG") and not os.getenv("PDFKB_MINERU_LANG"):
+            logger.warning("MINERU_LANG is deprecated, use PDFKB_MINERU_LANG instead")
+        if mineru_lang:
             config_kwargs["mineru_lang"] = mineru_lang
 
-        if mineru_method := os.getenv("MINERU_METHOD"):
+        mineru_method = os.getenv("PDFKB_MINERU_METHOD") or os.getenv("MINERU_METHOD")
+        if os.getenv("MINERU_METHOD") and not os.getenv("PDFKB_MINERU_METHOD"):
+            logger.warning("MINERU_METHOD is deprecated, use PDFKB_MINERU_METHOD instead")
+        if mineru_method:
             config_kwargs["mineru_method"] = mineru_method
 
-        if mineru_vram := os.getenv("MINERU_VRAM"):
+        mineru_vram = os.getenv("PDFKB_MINERU_VRAM") or os.getenv("MINERU_VRAM")
+        if os.getenv("MINERU_VRAM") and not os.getenv("PDFKB_MINERU_VRAM"):
+            logger.warning("MINERU_VRAM is deprecated, use PDFKB_MINERU_VRAM instead")
+        if mineru_vram:
             try:
                 config_kwargs["mineru_vram"] = int(mineru_vram)
             except ValueError:
-                raise ConfigurationError(f"Invalid MINERU_VRAM: {mineru_vram}")
+                raise ConfigurationError(f"Invalid PDFKB_MINERU_VRAM: {mineru_vram}")
 
         # Parse PDF chunker selection
-        if pdf_chunker := os.getenv("PDF_CHUNKER"):
+        pdf_chunker = os.getenv("PDFKB_PDF_CHUNKER") or os.getenv("PDF_CHUNKER")
+        if os.getenv("PDF_CHUNKER") and not os.getenv("PDFKB_PDF_CHUNKER"):
+            logger.warning("PDF_CHUNKER is deprecated, use PDFKB_PDF_CHUNKER instead")
+        if pdf_chunker:
             chunker = pdf_chunker.lower()
             if chunker not in ["langchain", "unstructured"]:
-                raise ConfigurationError(f"Invalid PDF_CHUNKER: {pdf_chunker}. Must be 'langchain' or 'unstructured'")
+                raise ConfigurationError(
+                    f"Invalid PDFKB_PDF_CHUNKER: {pdf_chunker}. Must be 'langchain' or 'unstructured'"
+                )
             config_kwargs["pdf_chunker"] = chunker
+
+        # Parse web server configuration
+        if web_enabled := os.getenv("PDFKB_ENABLE_WEB"):
+            config_kwargs["web_enabled"] = web_enabled.lower() in ["true", "1", "yes"]
+
+        web_port = os.getenv("PDFKB_WEB_PORT") or os.getenv("WEB_PORT")
+        if os.getenv("WEB_PORT") and not os.getenv("PDFKB_WEB_PORT"):
+            logger.warning("WEB_PORT is deprecated, use PDFKB_WEB_PORT instead")
+        if web_port:
+            try:
+                config_kwargs["web_port"] = int(web_port)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_WEB_PORT: {web_port}")
+
+        web_host = os.getenv("PDFKB_WEB_HOST") or os.getenv("WEB_HOST")
+        if os.getenv("WEB_HOST") and not os.getenv("PDFKB_WEB_HOST"):
+            logger.warning("WEB_HOST is deprecated, use PDFKB_WEB_HOST instead")
+        if web_host:
+            config_kwargs["web_host"] = web_host
+
+        web_cors_origins = os.getenv("PDFKB_WEB_CORS_ORIGINS") or os.getenv("WEB_CORS_ORIGINS")
+        if os.getenv("WEB_CORS_ORIGINS") and not os.getenv("PDFKB_WEB_CORS_ORIGINS"):
+            logger.warning("WEB_CORS_ORIGINS is deprecated, use PDFKB_WEB_CORS_ORIGINS instead")
+        if web_cors_origins:
+            config_kwargs["web_cors_origins"] = [origin.strip() for origin in web_cors_origins.split(",")]
 
         return cls(**config_kwargs)
 

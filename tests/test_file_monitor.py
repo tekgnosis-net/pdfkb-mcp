@@ -170,6 +170,103 @@ class TestFileMonitor:
         # This test is now covered by test_calculate_checksum
         assert True
 
+    @pytest.mark.asyncio
+    async def test_directory_exclusion_uploads(self, file_monitor, temp_dir):
+        """Test that files in uploads directory are excluded."""
+        # Create uploads directory and files
+        uploads_dir = temp_dir / "uploads"
+        uploads_dir.mkdir(exist_ok=True)
+
+        # Create files in uploads directory
+        upload_file = uploads_dir / "test.pdf"
+        upload_file.write_bytes(b"upload content")
+
+        # Create files in nested uploads directory
+        nested_uploads = temp_dir / "subdir" / "uploads"
+        nested_uploads.mkdir(parents=True)
+        nested_file = nested_uploads / "nested.pdf"
+        nested_file.write_bytes(b"nested content")
+
+        # Create regular file outside uploads
+        regular_file = temp_dir / "regular.pdf"
+        regular_file.write_bytes(b"regular content")
+
+        # Scan directory
+        files = await file_monitor.scan_directory()
+
+        # Should exclude uploads files but include regular file
+        assert upload_file not in files, "Files in uploads directory should be excluded"
+        assert nested_file not in files, "Files in nested uploads directory should be excluded"
+        assert regular_file in files, "Regular files should be included"
+
+    @pytest.mark.asyncio
+    async def test_directory_exclusion_cache(self, file_monitor, temp_dir):
+        """Test that files in .cache directory are excluded."""
+        # Create .cache directory and files
+        cache_dir = temp_dir / ".cache"
+        cache_dir.mkdir(exist_ok=True)
+
+        # Create files in .cache directory
+        cache_file = cache_dir / "cache.pdf"
+        cache_file.write_bytes(b"cache content")
+
+        # Create files in nested .cache directory
+        nested_cache = temp_dir / "subdir" / ".cache"
+        nested_cache.mkdir(parents=True)
+        nested_cache_file = nested_cache / "nested_cache.pdf"
+        nested_cache_file.write_bytes(b"nested cache content")
+
+        # Create regular file outside .cache
+        regular_file = temp_dir / "regular.pdf"
+        regular_file.write_bytes(b"regular content")
+
+        # Scan directory
+        files = await file_monitor.scan_directory()
+
+        # Should exclude cache files but include regular file
+        assert cache_file not in files, "Files in .cache directory should be excluded"
+        assert nested_cache_file not in files, "Files in nested .cache directory should be excluded"
+        assert regular_file in files, "Regular files should be included"
+
+    @pytest.mark.asyncio
+    async def test_is_excluded_directory_method(self, file_monitor, temp_dir):
+        """Test the _is_excluded_directory method directly."""
+        # Create test paths
+        uploads_file = temp_dir / "uploads" / "test.pdf"
+        cache_file = temp_dir / ".cache" / "test.pdf"
+        regular_file = temp_dir / "regular.pdf"
+        nested_uploads = temp_dir / "subdir" / "uploads" / "nested.pdf"
+        nested_cache = temp_dir / "docs" / ".cache" / "cached.pdf"
+
+        # Test exclusion logic
+        assert file_monitor._is_excluded_directory(uploads_file) is True, "Files in uploads should be excluded"
+        assert file_monitor._is_excluded_directory(cache_file) is True, "Files in .cache should be excluded"
+        assert file_monitor._is_excluded_directory(regular_file) is False, "Regular files should not be excluded"
+        assert file_monitor._is_excluded_directory(nested_uploads) is True, "Files in nested uploads should be excluded"
+        assert file_monitor._is_excluded_directory(nested_cache) is True, "Files in nested .cache should be excluded"
+
+    @pytest.mark.asyncio
+    async def test_watchdog_event_handler_exclusion(self, file_monitor, temp_dir):
+        """Test that watchdog event handler excludes files in restricted directories."""
+        # Create test files
+        uploads_dir = temp_dir / "uploads"
+        uploads_dir.mkdir()
+        uploads_file = uploads_dir / "test.pdf"
+        uploads_file.write_bytes(b"upload content")
+
+        regular_file = temp_dir / "regular.pdf"
+        regular_file.write_bytes(b"regular content")
+
+        # Create the PDFEventHandler (inner class from _start_watchdog)
+        # We need to access it indirectly since it's defined inside the method
+        with patch("watchdog.observers.Observer"):
+            await file_monitor._start_watchdog()
+            event_handler = file_monitor.event_handler
+
+            # Test the _is_supported_file method
+            assert event_handler._is_supported_file(str(uploads_file)) is False, "Uploads files should not be supported"
+            assert event_handler._is_supported_file(str(regular_file)) is True, "Regular files should be supported"
+
     # TODO: Add more comprehensive tests when real implementation is added
     # - Test with real file system events
     # - Test concurrent file operations

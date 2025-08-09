@@ -1,5 +1,6 @@
 """PDF processing and chunking functionality."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -296,7 +297,7 @@ class PDFProcessor:
         return self._get_document_cache_dir(file_path) / "chunking_result.json"
 
     async def _save_parsing_result(self, file_path: Path, parse_result: ParseResult, checksum: str) -> None:
-        """Save parsing result to cache.
+        """Save parsing result to cache using a thread pool.
 
         Args:
             file_path: Path to the PDF file.
@@ -313,8 +314,11 @@ class PDFProcessor:
             }
 
             cache_path = self._get_parsing_cache_path(file_path)
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, indent=2)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self._write_json_sync(cache_path, cache_data),
+            )
 
             logger.debug(f"Saved parsing result to cache: {cache_path}")
 
@@ -322,7 +326,7 @@ class PDFProcessor:
             logger.warning(f"Failed to save parsing result to cache: {e}")
 
     async def _load_parsing_result(self, file_path: Path, checksum: str) -> Optional[ParseResult]:
-        """Load parsing result from cache if valid.
+        """Load parsing result from cache using a thread pool if valid.
 
         Args:
             file_path: Path to the PDF file.
@@ -336,8 +340,11 @@ class PDFProcessor:
             if not cache_path.exists():
                 return None
 
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
+            loop = asyncio.get_running_loop()
+            cache_data = await loop.run_in_executor(
+                None,
+                lambda: self._read_json_sync(cache_path),
+            )
 
             # Validate cache
             if cache_data.get("checksum") != checksum:
@@ -352,7 +359,10 @@ class PDFProcessor:
                     return None
 
             # Cache is valid, return ParseResult
-            parse_result = ParseResult(markdown_content=cache_data["markdown_content"], metadata=cache_data["metadata"])
+            parse_result = ParseResult(
+                markdown_content=cache_data["markdown_content"],
+                metadata=cache_data["metadata"],
+            )
 
             logger.info(f"Loaded parsing result from cache: {cache_path}")
             return parse_result
@@ -362,7 +372,7 @@ class PDFProcessor:
             return None
 
     async def _save_chunking_result(self, file_path: Path, chunks: List[Chunk], checksum: str) -> None:
-        """Save chunking result to cache.
+        """Save chunking result to cache using a thread pool.
 
         Args:
             file_path: Path to the PDF file.
@@ -386,8 +396,11 @@ class PDFProcessor:
             }
 
             cache_path = self._get_chunking_cache_path(file_path)
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, indent=2)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self._write_json_sync(cache_path, cache_data),
+            )
 
             logger.debug(f"Saved chunking result to cache: {cache_path}")
 
@@ -395,7 +408,7 @@ class PDFProcessor:
             logger.warning(f"Failed to save chunking result to cache: {e}")
 
     async def _load_chunking_result(self, file_path: Path, checksum: str) -> Optional[List[Chunk]]:
-        """Load chunking result from cache if valid.
+        """Load chunking result from cache using a thread pool if valid.
 
         Args:
             file_path: Path to the PDF file.
@@ -409,8 +422,11 @@ class PDFProcessor:
             if not cache_path.exists():
                 return None
 
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
+            loop = asyncio.get_running_loop()
+            cache_data = await loop.run_in_executor(
+                None,
+                lambda: self._read_json_sync(cache_path),
+            )
 
             # Validate cache
             if cache_data.get("checksum") != checksum:
@@ -655,7 +671,7 @@ class PDFProcessor:
             # Don't raise - document can be stored without embeddings
 
     async def _calculate_checksum(self, file_path: Path) -> str:
-        """Calculate SHA-256 checksum of the file.
+        """Calculate SHA-256 checksum of the file using thread pool execution.
 
         Args:
             file_path: Path to the file.
@@ -664,17 +680,46 @@ class PDFProcessor:
             SHA-256 checksum as hex string.
         """
         try:
-            hash_sha256 = hashlib.sha256()
 
-            # Read file in chunks to handle large files
-            with open(file_path, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    hash_sha256.update(chunk)
+            def _calculate_checksum_sync(file_path: Path) -> str:
+                """Synchronous checksum calculation for thread pool execution."""
+                hash_sha256 = hashlib.sha256()
 
-            return hash_sha256.hexdigest()
+                # Read file in chunks to handle large files
+                with open(file_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_sha256.update(chunk)
+
+                return hash_sha256.hexdigest()
+
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, _calculate_checksum_sync, file_path)
 
         except Exception as e:
             raise PDFProcessingError(f"Failed to calculate checksum: {e}", str(file_path), e)
+
+    def _write_json_sync(self, file_path: Path, data: Dict[str, Any]) -> None:
+        """Synchronously write JSON data to file for thread pool execution.
+
+        Args:
+            file_path: Path to write the JSON file.
+            data: Data to serialize to JSON.
+        """
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def _read_json_sync(self, file_path: Path) -> Dict[str, Any]:
+        """Synchronously read JSON data from file for thread pool execution.
+
+        Args:
+            file_path: Path to read the JSON file from.
+
+        Returns:
+            Dictionary with the JSON data.
+        """
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     async def reprocess_cached_documents(self) -> List[Document]:
         """Re-process cached markdown files when chunking/embedding config changes.

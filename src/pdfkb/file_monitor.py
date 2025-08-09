@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .background_queue import BackgroundProcessingQueue, Job, JobType, Priority
 from .config import ServerConfig
 from .exceptions import FileMonitorError, FileSystemError
 
@@ -141,6 +142,8 @@ class FileMonitor:
         pdf_processor=None,
         vector_store=None,
         document_cache_callback=None,
+        background_queue: Optional[BackgroundProcessingQueue] = None,
+        web_document_service=None,
     ):
         """Initialize the file monitor.
 
@@ -149,11 +152,21 @@ class FileMonitor:
             pdf_processor: PDF processing service.
             vector_store: Vector storage service.
             document_cache_callback: Callback function to update main server's document cache.
+            background_queue: Optional background processing queue for non-blocking file processing.
+            web_document_service: Optional WebDocumentService for creating in-progress document placeholders.
         """
         self.config = config
         self.pdf_processor = pdf_processor
         self.vector_store = vector_store
         self.document_cache_callback = document_cache_callback
+        self.background_queue = background_queue
+        self.web_document_service = web_document_service  # Store the web document service
+        if self.background_queue:
+            logger.info("🎯 FILE MONITOR: Background queue is AVAILABLE - will use background processing")
+        else:
+            logger.warning(
+                "⚠️ FILE MONITOR: Background queue is NOT AVAILABLE - will use synchronous processing (blocks server!)"
+            )
 
         # File system monitoring
         self.observer = None
@@ -178,6 +191,9 @@ class FileMonitor:
 
         # Thread pool for I/O operations
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="FileMonitor")
+
+        # Directory exclusion settings
+        self.excluded_directories = {"uploads", ".cache"}
 
     async def start_monitoring(self) -> None:
         """Start file system monitoring."""
@@ -270,11 +286,45 @@ class FileMonitor:
             cached_file_resolved = {str(Path(f).resolve()): f for f in cached_files}
 
             # Find new files (exist on disk but not in cache)
-            new_files = []
+            potentially_new_files = []
             for file_path in current_files:
                 resolved_path = str(file_path.resolve())
                 if resolved_path not in cached_file_resolved:
-                    new_files.append(file_path)
+                    potentially_new_files.append(file_path)
+
+            # Filter out files that already exist as completed documents in the document cache
+            # This prevents treating already-processed documents as "new" during startup
+            new_files = []
+            if self.web_document_service and hasattr(self.web_document_service, "document_cache"):
+                for file_path in potentially_new_files:
+                    # Check if a document with this path already exists in the document cache
+                    document_exists = False
+                    for doc_id, document in self.web_document_service.document_cache.items():
+                        if hasattr(document, "path") and str(Path(document.path).resolve()) == str(file_path.resolve()):
+                            document_exists = True
+                            # Update our file index with the existing document info
+                            try:
+                                stat = file_path.stat()
+                                checksum = await self.get_file_checksum(file_path)
+                                metadata = FileMetadata(
+                                    path=str(file_path.resolve()),
+                                    checksum=checksum,
+                                    last_modified=stat.st_mtime,
+                                    file_size=stat.st_size,
+                                    processed_time=time.time(),
+                                    document_id=doc_id,
+                                )
+                                await self.update_file_metadata(file_path, metadata)
+                                logger.debug(f"Updated file index for existing document {file_path}")
+                            except Exception as e:
+                                logger.warning(f"Failed to update file index for existing document {file_path}: {e}")
+                            break
+
+                    if not document_exists:
+                        new_files.append(file_path)
+            else:
+                # No document cache available, treat all as potentially new
+                new_files = potentially_new_files
 
             # Find deleted files (in cache but not on disk)
             deleted_files = []
@@ -296,19 +346,70 @@ class FileMonitor:
                 f"Startup sync: {len(new_files)} new, {len(modified_files)} modified, {len(deleted_files)} deleted"
             )
 
-            # Process changes
+            # Queue changes for background processing (non-blocking)
+            files_queued = 0
             for file_path in new_files:
-                await self._queue_file_processing(file_path, "created")
+                if self.background_queue:
+                    logger.info(f"🚀 STARTUP SYNC: Queuing NEW file {file_path} for BACKGROUND processing")
+                    await self._queue_file_for_processing(file_path, JobType.FILE_WATCHER)
+                    files_queued += 1
+                else:
+                    logger.warning(
+                        f"⚠️ STARTUP SYNC: No background queue, queuing NEW file {file_path} for SYNCHRONOUS processing"
+                    )
+                    await self._queue_file_processing(file_path, "created")
 
             for file_path in modified_files:
-                await self._queue_file_processing(file_path, "modified")
+                if self.background_queue:
+                    logger.info(f"🚀 STARTUP SYNC: Queuing MODIFIED file {file_path} for BACKGROUND processing")
+                    await self._queue_file_for_processing(file_path, JobType.FILE_WATCHER)
+                    files_queued += 1
+                else:
+                    logger.warning(
+                        f"⚠️ STARTUP SYNC: No background queue, queuing MODIFIED file {file_path} "
+                        f"for SYNCHRONOUS processing"
+                    )
+                    await self._queue_file_processing(file_path, "modified")
 
             for file_path in deleted_files:
                 await self.remove_file(file_path)
 
+            if files_queued > 0:
+                logger.info(f"Queued {files_queued} files for background processing - server will remain responsive")
+
+            logger.info("Startup synchronization completed - background processing will continue independently")
+
         except Exception as e:
             logger.error(f"Startup synchronization failed: {e}")
             raise FileMonitorError(f"Startup synchronization failed: {e}", "startup_sync", e)
+
+    def _is_excluded_directory(self, file_path: Path) -> bool:
+        """Check if a file path is in an excluded directory.
+
+        Args:
+            file_path: Path to check.
+
+        Returns:
+            True if the file is in an excluded directory.
+        """
+        try:
+            # Convert to relative path from knowledgebase directory for comparison
+            try:
+                relative_path = file_path.relative_to(self.config.knowledgebase_path)
+            except ValueError:
+                # Path is not within knowledgebase directory, allow it
+                return False
+
+            # Check if any part of the path matches excluded directories
+            for part in relative_path.parts:
+                if part in self.excluded_directories:
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Error checking directory exclusion for {file_path}: {e}")
+            return False  # Default to not excluded on error
 
     async def scan_directory(self) -> List[Path]:
         """Scan the knowledgebase directory for supported files.
@@ -325,10 +426,12 @@ class FileMonitor:
             for ext in self.config.supported_extensions:
                 pattern = f"**/*{ext}"
                 for file_path in self.config.knowledgebase_path.rglob(pattern):
-                    if file_path.is_file():
+                    if file_path.is_file() and not self._is_excluded_directory(file_path):
                         files.append(file_path)
 
-            logger.debug(f"Scanned directory: found {len(files)} files")
+            logger.debug(
+                f"Scanned directory: found {len(files)} files (excluded directories: {self.excluded_directories})"
+            )
             return files
 
         except Exception as e:
@@ -346,6 +449,183 @@ class FileMonitor:
                 logger.debug(f"File already being processed: {file_path}")
                 return
 
+            # If background queue is available, queue the file for processing
+            if self.background_queue:
+                logger.info(f"🚀 FILE MONITOR: Queuing file {file_path} for BACKGROUND processing")
+                await self._queue_file_for_processing(file_path, JobType.FILE_WATCHER)
+                return
+
+            # Fallback: Process synchronously
+            logger.warning(
+                f"⚠️ FILE MONITOR: No background queue available, processing {file_path} "
+                f"SYNCHRONOUSLY (this will block the server!)"
+            )
+            await self._process_file_synchronously(file_path)
+
+        except Exception as e:
+            self.failed_files[str(file_path)] = str(e)
+            self.processing_stats["failed"] += 1
+            logger.error(f"Error processing new file {file_path}: {e}")
+
+    async def _queue_file_for_processing(self, file_path: Path, job_type: JobType) -> None:
+        """Queue a file for background processing.
+
+        Args:
+            file_path: Path to the file to process.
+            job_type: Type of job for prioritization.
+        """
+        try:
+            # Calculate file metadata before queuing
+            checksum = await self.get_file_checksum(file_path)
+            stat = file_path.stat()
+
+            # Create job metadata
+            job_metadata = {
+                "file_path": str(file_path),
+                "checksum": checksum,
+                "file_size": stat.st_size,
+                "last_modified": stat.st_mtime,
+                "queued_time": time.time(),
+            }
+
+            # Queue the job with appropriate priority
+            priority = Priority.NORMAL if job_type == JobType.FILE_WATCHER else Priority.HIGH
+
+            job_id = await self.background_queue.add_job(
+                job_type=job_type,
+                metadata=job_metadata,
+                priority=priority,
+                processor=self._process_pdf_job,
+            )
+
+            # Create in-progress document placeholder if web service is available
+            # But only if document doesn't already exist (to avoid showing existing docs as "Processing")
+            if self.web_document_service:
+                try:
+                    # Check if document already exists in document cache
+                    normalized_path = str(file_path.resolve())
+                    existing_metadata = self.file_index.get(normalized_path)
+
+                    # Skip creating in-progress document if:
+                    # 1. File metadata shows it's already processed, OR
+                    # 2. A document with same path exists in document cache
+                    should_create_placeholder = True
+
+                    if existing_metadata and existing_metadata.document_id:
+                        # Check if document exists in cache
+                        if (
+                            hasattr(self.web_document_service, "document_cache")
+                            and existing_metadata.document_id in self.web_document_service.document_cache
+                        ):
+                            should_create_placeholder = False
+                            logger.debug(f"Skipping in-progress document for {file_path} - already exists in cache")
+
+                    if should_create_placeholder:
+                        in_progress_doc = self.web_document_service._create_in_progress_document(
+                            job_id=job_id, filename=file_path.name, file_size=stat.st_size, temp_path=str(file_path)
+                        )
+                        in_progress_doc.path = str(file_path)  # Use actual path
+                        self.web_document_service.in_progress_documents[in_progress_doc.id] = in_progress_doc
+                        logger.debug(f"Created in-progress document {in_progress_doc.id} for file {file_path}")
+
+                except Exception as e:
+                    logger.error(f"Failed to create in-progress document for {file_path}: {e}")
+
+            logger.info(f"Queued file for processing: {file_path} (job_id: {job_id})")
+
+        except Exception as e:
+            logger.error(f"Failed to queue file for processing {file_path}: {e}")
+            # Fallback to synchronous processing on queue failure
+            await self._process_file_synchronously(file_path)
+
+    async def _process_pdf_job(self, job: Job) -> None:
+        """Background job processor for PDF files.
+
+        Args:
+            job: Job instance containing file processing metadata.
+        """
+        file_path_str = job.metadata["file_path"]
+        file_path = Path(file_path_str)
+        job_id = job.job_id
+
+        try:
+            self.processing_files.add(file_path_str)
+            logger.info(f"Starting background processing for: {file_path} (job_id: {job_id})")
+
+            # Process the file
+            if not self.pdf_processor:
+                # Just track the file without processing
+                checksum = job.metadata["checksum"]
+                metadata = FileMetadata(
+                    path=file_path_str,
+                    checksum=checksum,
+                    last_modified=job.metadata["last_modified"],
+                    file_size=job.metadata["file_size"],
+                )
+                await self.update_file_metadata(file_path, metadata)
+                self.processing_stats["skipped"] += 1
+                logger.info(f"Tracked file without processing: {file_path}")
+
+                # Remove in-progress document on skipped processing if web service is available
+                if self.web_document_service:
+                    self._remove_in_progress_document(job_id)
+                return
+
+            result = await self.pdf_processor.process_pdf(file_path)
+
+            if result.success and result.document:
+                # Add to vector store
+                if self.vector_store:
+                    await self.vector_store.add_document(result.document)
+
+                # Update metadata
+                metadata = FileMetadata(
+                    path=file_path_str,
+                    checksum=job.metadata["checksum"],
+                    last_modified=job.metadata["last_modified"],
+                    file_size=job.metadata["file_size"],
+                    processed_time=time.time(),
+                    document_id=result.document.id,
+                )
+                await self.update_file_metadata(file_path, metadata)
+
+                # Update main server's document cache via callback
+                if self.document_cache_callback:
+                    await self.document_cache_callback(result.document)
+
+                # Remove in-progress document on success if web service is available
+                if self.web_document_service:
+                    self._remove_in_progress_document(job_id)
+
+                self.processing_stats["processed"] += 1
+                logger.info(f"Successfully processed file in background: {file_path}")
+                logger.debug(f"Document ID for processed file: {result.document.id}")
+            else:
+                error_msg = result.error or "Unknown processing error"
+                self.failed_files[file_path_str] = error_msg
+                self.processing_stats["failed"] += 1
+
+                # Update in-progress document status on failure if web service is available
+                if self.web_document_service:
+                    self._update_in_progress_document_failed(job_id, error_msg)
+                logger.error(f"Failed to process file {file_path}: {error_msg}")
+                raise Exception(error_msg)
+
+        except Exception as e:
+            self.failed_files[file_path_str] = str(e)
+            self.processing_stats["failed"] += 1
+            logger.error(f"Error in background processing for {file_path}: {e}")
+            raise
+        finally:
+            self.processing_files.discard(file_path_str)
+
+    async def _process_file_synchronously(self, file_path: Path) -> None:
+        """Process a file synchronously (fallback when no background queue).
+
+        Args:
+            file_path: Path to the file to process.
+        """
+        try:
             self.processing_files.add(str(file_path))
 
             try:
@@ -403,7 +683,7 @@ class FileMonitor:
         except Exception as e:
             self.failed_files[str(file_path)] = str(e)
             self.processing_stats["failed"] += 1
-            logger.error(f"Error processing new file {file_path}: {e}")
+            logger.error(f"Error processing file synchronously {file_path}: {e}")
 
     async def remove_file(self, file_path: Path) -> None:
         """Remove a deleted file from tracking and vector store.
@@ -418,10 +698,28 @@ class FileMonitor:
             # Get metadata before removal
             metadata = self.file_index.get(normalized_path)
 
-            # Remove from vector store if we have a document ID
-            if metadata and metadata.document_id and self.vector_store:
-                removed_count = await self.vector_store.remove_document(metadata.document_id)
-                logger.info(f"Removed {removed_count} chunks from vector store for deleted file: {file_path}")
+            document_id = None
+            if metadata and metadata.document_id:
+                document_id = metadata.document_id
+
+                # Remove from vector store
+                if self.vector_store:
+                    removed_count = await self.vector_store.delete_document(document_id)
+                    logger.info(f"Removed {removed_count} chunks from vector store for deleted file: {file_path}")
+
+                # Remove from main document cache via callback if available
+                if self.web_document_service and hasattr(self.web_document_service, "document_cache"):
+                    if document_id in self.web_document_service.document_cache:
+                        del self.web_document_service.document_cache[document_id]
+                        logger.info(f"Removed document {document_id} from document cache")
+
+                        # Save the updated cache if callback available
+                        if self.web_document_service.save_cache_callback:
+                            try:
+                                await self.web_document_service.save_cache_callback()
+                                logger.debug(f"Saved document cache after removing {document_id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to save document cache after removal: {e}")
 
             # Remove from file index
             async with self.index_lock:
@@ -432,7 +730,10 @@ class FileMonitor:
             # Remove from failed files if present
             self.failed_files.pop(normalized_path, None)
 
-            logger.info(f"Removed file from tracking: {file_path}")
+            if document_id:
+                logger.info(f"Removed file {file_path} (document {document_id}) from all tracking systems")
+            else:
+                logger.info(f"Removed file {file_path} from tracking (no associated document)")
 
         except Exception as e:
             logger.error(f"Error removing file {file_path}: {e}")
@@ -626,17 +927,29 @@ class FileMonitor:
 
                 def on_created(self, event: FileSystemEvent):
                     if not event.is_directory and self._is_supported_file(event.src_path):
-                        asyncio.run_coroutine_threadsafe(
-                            self.monitor._queue_file_processing(Path(event.src_path), "created"),
-                            self.loop,
-                        )
+                        if self.monitor.background_queue:
+                            asyncio.run_coroutine_threadsafe(
+                                self.monitor._queue_file_for_processing(Path(event.src_path), JobType.FILE_WATCHER),
+                                self.loop,
+                            )
+                        else:
+                            asyncio.run_coroutine_threadsafe(
+                                self.monitor._queue_file_processing(Path(event.src_path), "created"),
+                                self.loop,
+                            )
 
                 def on_modified(self, event: FileSystemEvent):
                     if not event.is_directory and self._is_supported_file(event.src_path):
-                        asyncio.run_coroutine_threadsafe(
-                            self.monitor._queue_file_processing(Path(event.src_path), "modified"),
-                            self.loop,
-                        )
+                        if self.monitor.background_queue:
+                            asyncio.run_coroutine_threadsafe(
+                                self.monitor._queue_file_for_processing(Path(event.src_path), JobType.FILE_WATCHER),
+                                self.loop,
+                            )
+                        else:
+                            asyncio.run_coroutine_threadsafe(
+                                self.monitor._queue_file_processing(Path(event.src_path), "modified"),
+                                self.loop,
+                            )
 
                 def on_deleted(self, event: FileSystemEvent):
                     if not event.is_directory and self._is_supported_file(event.src_path):
@@ -648,15 +961,31 @@ class FileMonitor:
                         asyncio.run_coroutine_threadsafe(self.monitor.remove_file(Path(event.src_path)), self.loop)
 
                     if hasattr(event, "dest_path") and self._is_supported_file(event.dest_path):
-                        asyncio.run_coroutine_threadsafe(
-                            self.monitor._queue_file_processing(Path(event.dest_path), "created"),
-                            self.loop,
-                        )
+                        if self.monitor.background_queue:
+                            asyncio.run_coroutine_threadsafe(
+                                self.monitor._queue_file_for_processing(Path(event.dest_path), JobType.FILE_WATCHER),
+                                self.loop,
+                            )
+                        else:
+                            asyncio.run_coroutine_threadsafe(
+                                self.monitor._queue_file_processing(Path(event.dest_path), "created"),
+                                self.loop,
+                            )
 
                 def _is_supported_file(self, file_path: str) -> bool:
-                    """Check if file has supported extension."""
+                    """Check if file has supported extension and is not in an excluded directory."""
                     path = Path(file_path)
-                    return path.suffix.lower() in [ext.lower() for ext in self.monitor.config.supported_extensions]
+
+                    # Check if file has supported extension
+                    if path.suffix.lower() not in [ext.lower() for ext in self.monitor.config.supported_extensions]:
+                        return False
+
+                    # Check if file is in an excluded directory
+                    if self.monitor._is_excluded_directory(path):
+                        logger.debug(f"Excluding file in restricted directory: {path}")
+                        return False
+
+                    return True
 
             self.event_handler = PDFEventHandler(self)
             self.observer = Observer()
@@ -859,3 +1188,36 @@ class FileMonitor:
         except Exception as e:
             logger.error(f"Forced rescan failed: {e}")
             raise FileMonitorError(f"Forced rescan failed: {e}", "force_rescan", e)
+
+    def _remove_in_progress_document(self, job_id: str) -> None:
+        """Remove in-progress document by job ID."""
+        if not self.web_document_service:
+            return
+
+        try:
+            # Find in-progress document by job_id
+            for doc_id, doc in list(self.web_document_service.in_progress_documents.items()):
+                if doc.job_id == job_id:
+                    del self.web_document_service.in_progress_documents[doc_id]
+                    logger.info(f"📋 FILE MONITOR: Removed in-progress document {doc_id} after processing")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to remove in-progress document for job {job_id}: {e}")
+
+    def _update_in_progress_document_failed(self, job_id: str, error_msg: str) -> None:
+        """Update in-progress document status to failed."""
+        if not self.web_document_service:
+            return
+
+        try:
+            from .web.models.web_models import ProcessingStatus
+
+            # Find and update in-progress document by job_id
+            for doc_id, doc in self.web_document_service.in_progress_documents.items():
+                if doc.job_id == job_id:
+                    doc.processing_status = ProcessingStatus.FAILED
+                    doc.processing_error = error_msg
+                    logger.info(f"📋 FILE MONITOR: Updated in-progress document {doc_id} status to FAILED")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to update in-progress document status for job {job_id}: {e}")

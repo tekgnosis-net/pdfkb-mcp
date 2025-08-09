@@ -48,6 +48,14 @@ dependencies = [
 
     # Environment configuration
     "dotenv>=0.9.9",
+
+    # Web interface core dependencies
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "python-multipart>=0.0.6",
+    "websockets>=12.0",
+    "pydantic>=2.5.0",
+
     # Default parser and chunker dependencies for OOTB experience
     "pymupdf4llm>=0.0.27",
     "PyMuPDF>=1.26.3",
@@ -119,9 +127,16 @@ unstructured_chunker = [
     "unstructured>=0.18.11",
 ]
 
+web = [
+    # Enhanced web server monitoring and performance
+    "psutil>=6.0.0",  # System metrics for /api/metrics endpoint
+    "starlette>=0.27.0",  # FastAPI dependency (explicit for clarity)
+]
+
 all = [
     # Include all optional dependency groups
     "pdfkb-mcp[dev]",
+    "pdfkb-mcp[web]",
     "pdfkb-mcp[unstructured]",
     "pdfkb-mcp[pymupdf4llm]",
     "pdfkb-mcp[langchain]",
@@ -133,10 +148,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/pdfkb-mcp"
-Documentation = "https://github.com/your-org/pdfkb-mcp#readme"
-Repository = "https://github.com/your-org/pdfkb-mcp"
-Issues = "https://github.com/your-org/pdfkb-mcp/issues"
+Homepage = "https://github.com/juanqui/pdfkb-mcp"
+Documentation = "https://github.com/juanqui/pdfkb-mcp#readme"
+Repository = "https://github.com/juanqui/pdfkb-mcp"
+Issues = "https://github.com/juanqui/pdfkb-mcp/issues"
 
 [project.scripts]
 pdfkb-mcp = "pdfkb.main:main"
@@ -212,6 +227,9 @@ module = [
     "unstructured.*",
     "fastmcp.*",
     "mcp.*",
+    "uvicorn.*",
+    "websockets.*",
+    "psutil.*",
 ]
 ignore_missing_imports = true
 
@@ -269,6 +287,9 @@ dependencies = [
     "isort",
     "mypy",
     "flake8",
+    # Web interface testing dependencies
+    "httpx>=0.25.0",
+    "psutil>=6.0.0",
     # Common optional dependencies needed by tests
     "unstructured[pdf]>=0.18.11",
     "pymupdf4llm>=0.0.27",

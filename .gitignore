@@ -268,12 +268,16 @@ logs/
 .vim/
 .nvim/
 
+# Kilo
+.kilocode/mcp.json
+
 # OS-specific
 .Trash-*
 $RECYCLE.BIN/
 
 # Samples
 samples/
+samples2/
 pdfs/
 
 # Test

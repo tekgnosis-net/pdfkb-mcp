@@ -3,7 +3,7 @@
 A Model Context Protocol server for managing PDF documents with vector search capabilities.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.1.1"
 
 from .config import ServerConfig
 from .embeddings import EmbeddingService
@@ -33,12 +33,19 @@ from .models import Chunk, Document, ProcessingResult, SearchQuery, SearchResult
 from .pdf_processor import PDFProcessor
 from .vector_store import VectorStore
 
+# Web server integration
+from .web_server import IntegratedPDFKnowledgebaseServer, run_integrated_server, run_web_only_server
+
 __all__ = [
     # Version
     "__version__",
     # Core server and configuration
     "PDFKnowledgebaseServer",
     "ServerConfig",
+    # Web server integration
+    "IntegratedPDFKnowledgebaseServer",
+    "run_integrated_server",
+    "run_web_only_server",
     # Data models
     "Document",
     "Chunk",

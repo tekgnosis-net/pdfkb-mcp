@@ -51,11 +51,12 @@ class TestDoclingIntegration:
             "os.environ",
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
-                "PDF_PARSER": "docling",
+                "PDFKB_PDF_PARSER": "docling",
                 "DOCLING_OCR_ENGINE": "tesseract",
                 "DOCLING_TABLE_MODE": "ACCURATE",
                 "DOCLING_FORMULA_ENRICHMENT": "true",
             },
+            clear=True,
         ):
             config = ServerConfig.from_env()
 
@@ -77,8 +78,9 @@ class TestDoclingIntegration:
             "os.environ",
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
-                "PDF_PARSER": "docling",
+                "PDFKB_PDF_PARSER": "docling",
             },
+            clear=True,
         ):
             config = ServerConfig.from_env()
 
@@ -96,8 +98,9 @@ class TestDoclingIntegration:
             "os.environ",
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
-                "PDF_PARSER": "docling",
+                "PDFKB_PDF_PARSER": "docling",
             },
+            clear=True,
         ):
             config = ServerConfig.from_env()
 
@@ -125,8 +128,9 @@ class TestDoclingIntegration:
             "os.environ",
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
-                "PDF_PARSER": "docling",
+                "PDFKB_PDF_PARSER": "docling",
             },
+            clear=True,
         ):
             config = ServerConfig.from_env()
 
@@ -184,7 +188,7 @@ class TestDoclingEnvironmentVariables:
             "os.environ",
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
-                "PDF_PARSER": "docling",
+                "PDFKB_PDF_PARSER": "docling",
                 "DOCLING_OCR_ENGINE": "easyocr",
                 "DOCLING_OCR_LANGUAGES": "en,es,fr",
                 "DOCLING_TABLE_MODE": "FAST",
@@ -193,6 +197,7 @@ class TestDoclingEnvironmentVariables:
                 "DOCLING_DEVICE": "cuda",
                 "DOCLING_MAX_PAGES": "100",
             },
+            clear=True,
         ):
             config = ServerConfig.from_env()
 

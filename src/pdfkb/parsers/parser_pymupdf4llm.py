@@ -1,5 +1,6 @@
 """PDF parser using pymupdf4llm library."""
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -56,11 +57,15 @@ class PyMuPDF4LLMParser(PDFParser):
             config_copy.pop("show_progress", None)
 
             # Use pymupdf4llm to convert PDF to markdown
-            md_text = pymupdf4llm.to_markdown(
-                str(file_path),
-                page_chunks=True,  # Process by page for better chunking
-                show_progress=True,
-                **config_copy,
+            loop = asyncio.get_running_loop()
+            md_text = await loop.run_in_executor(
+                None,
+                lambda: pymupdf4llm.to_markdown(
+                    str(file_path),
+                    page_chunks=True,  # Process by page for better chunking
+                    show_progress=True,
+                    **config_copy,
+                ),
             )
 
             # Convert markdown text to proper format
