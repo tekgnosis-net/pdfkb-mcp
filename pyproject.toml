@@ -63,6 +63,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hybrid = [
+    "whoosh>=2.7.4",
+]
+
 dev = [
     # Testing
     "pytest>=8.0.0",
@@ -137,6 +141,7 @@ all = [
     # Include all optional dependency groups
     "pdfkb-mcp[dev]",
     "pdfkb-mcp[web]",
+    "pdfkb-mcp[hybrid]",
     "pdfkb-mcp[unstructured]",
     "pdfkb-mcp[pymupdf4llm]",
     "pdfkb-mcp[langchain]",
@@ -297,6 +302,7 @@ dependencies = [
     "docling>=2.43.0",
     "easyocr>=1.7.2",
     "reportlab>=4.4.0",
+    "whoosh>=2.7.4",
 ]
 
 [tool.hatch.envs.default.scripts]

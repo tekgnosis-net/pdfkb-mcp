@@ -213,6 +213,9 @@ class SearchResult:
     chunk: Chunk
     score: float
     document: Document
+    search_type: str = "hybrid"  # Which search contributed this result
+    vector_score: Optional[float] = None  # Original vector similarity
+    text_score: Optional[float] = None  # Original BM25 score
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert search result to dictionary."""
@@ -240,6 +243,7 @@ class SearchQuery:
     limit: int = 5
     metadata_filter: Optional[Dict[str, Any]] = None
     min_score: float = 0.0
+    search_type: str = "hybrid"  # "hybrid", "vector", "text"
 
     def __post_init__(self):
         """Validate query parameters."""

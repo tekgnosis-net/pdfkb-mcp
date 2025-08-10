@@ -268,8 +268,11 @@ logs/
 .vim/
 .nvim/
 
-# Kilo
+# Local Dev
 .kilocode/mcp.json
+.mcp.json
+docs/proposals/
+docs/specs/
 
 # OS-specific
 .Trash-*
@@ -283,3 +286,4 @@ pdfs/
 # Test
 test_cache
 test_pdfs
+test_env

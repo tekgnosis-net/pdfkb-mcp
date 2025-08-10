@@ -1,14 +1,17 @@
 # PDF Knowledgebase MCP Server
 
-A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides semantic search capabilities powered by OpenAI embeddings and ChromaDB vector storage.
+A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by OpenAI embeddings and ChromaDB vector storage.
 
-**🆕 NEW: Web Interface Available!** Now includes a modern web UI for document management and search alongside the traditional MCP protocol.
+**🆕 NEW Features:**
+- **Hybrid Search**: Combines semantic similarity with keyword matching (BM25) for superior search quality
+- **Web Interface**: Modern web UI for document management and search alongside the traditional MCP protocol
 
 ## Table of Contents
 
 - [🚀 Quick Start](#-quick-start)
 - [🌐 Web Interface](#-web-interface)
 - [🏗️ Architecture Overview](#️-architecture-overview)
+- [🔍 Hybrid Search](#-hybrid-search)
 - [🎯 Parser Selection Guide](#-parser-selection-guide)
 - [⚙️ Configuration](#️-configuration)
 - [🖥️ MCP Client Setup](#️-mcp-client-setup)
@@ -186,7 +189,7 @@ When running with web interface enabled, comprehensive API documentation is avai
 
 **Tools** (Actions your client can perform):
 - [`add_document(path, metadata?)`](src/pdfkb/main.py:278) - Add PDF to knowledgebase
-- [`search_documents(query, limit=5, metadata_filter?)`](src/pdfkb/main.py:345) - Semantic search across PDFs
+- [`search_documents(query, limit=5, metadata_filter?, search_type?)`](src/pdfkb/main.py:345) - Hybrid search across PDFs (semantic + keyword matching)
 - [`list_documents(metadata_filter?)`](src/pdfkb/main.py:422) - List all documents with metadata
 - [`remove_document(document_id)`](src/pdfkb/main.py:488) - Remove document from knowledgebase
 
@@ -194,6 +197,42 @@ When running with web interface enabled, comprehensive API documentation is avai
 - `pdf://{document_id}` - Full document content as JSON
 - `pdf://{document_id}/page/{page_number}` - Specific page content
 - `pdf://list` - List of all documents with metadata
+
+## 🔍 Hybrid Search
+
+The server now supports **Hybrid Search**, which combines the strengths of semantic similarity search (vector embeddings) with traditional keyword matching (BM25) for improved search quality.
+
+### How It Works
+
+1. **Dual Indexing**: Documents are indexed in both a vector database (ChromaDB) and a full-text search index (Whoosh)
+2. **Parallel Search**: Queries execute both semantic and keyword searches simultaneously
+3. **Reciprocal Rank Fusion (RRF)**: Results are intelligently merged using RRF algorithm for optimal ranking
+
+### Benefits
+
+- **Better Recall**: Finds documents that match exact keywords even if semantically different
+- **Improved Precision**: Combines conceptual understanding with keyword relevance
+- **Technical Terms**: Excellent for technical documentation, code references, and domain-specific terminology
+- **Balanced Results**: Configurable weights let you adjust the balance between semantic and keyword matching
+
+### Configuration
+
+Enable hybrid search by setting:
+```bash
+PDFKB_ENABLE_HYBRID_SEARCH=true  # Enable hybrid search (default: true)
+PDFKB_HYBRID_VECTOR_WEIGHT=0.6   # Weight for semantic search (default: 0.6)
+PDFKB_HYBRID_TEXT_WEIGHT=0.4     # Weight for keyword search (default: 0.4)
+PDFKB_RRF_K=60                   # RRF constant (default: 60)
+```
+
+### Installation
+
+To use hybrid search, install with the optional dependency:
+```bash
+pip install "pdfkb-mcp[hybrid]"
+```
+
+Or if using uvx, it's included by default when hybrid search is enabled.
 
 ## 🎯 Parser Selection Guide
 
@@ -337,6 +376,25 @@ Document Type & Priority?
 }
 ```
 
+**Hybrid Search (NEW - Improved Search Quality)**:
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true",
+        "PDFKB_HYBRID_VECTOR_WEIGHT": "0.6",
+        "PDFKB_HYBRID_TEXT_WEIGHT": "0.4"
+      },
+      "transport": "stdio"
+    }
+  }
+}
+```
+
 **Maximum Quality**:
 ```json
 {
@@ -372,6 +430,10 @@ Document Type & Priority?
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
 | `PDFKB_EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI embedding model (use `text-embedding-3-small` for faster processing) |
+| `PDFKB_ENABLE_HYBRID_SEARCH` | `true` | Enable hybrid search combining semantic and keyword matching |
+| `PDFKB_HYBRID_VECTOR_WEIGHT` | `0.6` | Weight for semantic search (0-1, must sum to 1 with text weight) |
+| `PDFKB_HYBRID_TEXT_WEIGHT` | `0.4` | Weight for keyword/BM25 search (0-1, must sum to 1 with vector weight) |
+| `PDFKB_RRF_K` | `60` | Reciprocal Rank Fusion constant (higher = less emphasis on rank differences) |
 
 ## 🖥️ MCP Client Setup
 

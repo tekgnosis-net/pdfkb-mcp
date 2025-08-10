@@ -412,19 +412,23 @@ class PDFKnowledgebaseServer:
 
         @self.app.tool()
         async def search_documents(
-            query: str, limit: int = 5, metadata_filter: Optional[Dict[str, Any]] = None
+            query: str,
+            limit: int = 5,
+            metadata_filter: Optional[Dict[str, Any]] = None,
+            search_type: Optional[str] = None,
         ) -> Dict[str, Any]:
             """Search for relevant content across the entire PDF knowledgebase.
 
-            This is the primary tool for finding information. It automatically searches through
-            all documents in the knowledgebase using semantic similarity - you do NOT need to
-            call list_documents first to know what documents are available. Simply provide your
-            search query and this tool will find the most relevant content across all PDFs.
+            This is the primary tool for finding information. By default, it uses hybrid search
+            combining semantic similarity (vector search) with keyword matching (BM25) for optimal
+            results. You do NOT need to call list_documents first - simply provide your search
+            query and this tool will find the most relevant content across all PDFs.
 
             Args:
                 query: Search query text describing what you're looking for.
                 limit: Maximum number of results to return (default: 5).
                 metadata_filter: Optional metadata filters to apply to narrow results.
+                search_type: Optional search type - "hybrid" (default), "vector", or "text".
 
             Returns:
                 Search results with relevant document chunks, similarity scores, and metadata.
@@ -437,11 +441,21 @@ class PDFKnowledgebaseServer:
                 if limit <= 0:
                     raise ValidationError("Limit must be positive", "limit")
 
-                logger.info(f"Searching for: {query} (limit: {limit})")
+                # Validate search_type
+                if search_type and search_type not in ["hybrid", "vector", "text"]:
+                    raise ValidationError("search_type must be 'hybrid', 'vector', or 'text'", "search_type")
+
+                # Use hybrid by default if enabled, otherwise fall back to vector
+                if search_type is None:
+                    search_type = "hybrid" if self.config.enable_hybrid_search else "vector"
+
+                logger.info(f"Searching for: {query} (limit: {limit}, type: {search_type})")
                 start_time = time.time()
 
                 # Create search query object
-                search_query = SearchQuery(query=query.strip(), limit=limit, metadata_filter=metadata_filter)
+                search_query = SearchQuery(
+                    query=query.strip(), limit=limit, metadata_filter=metadata_filter, search_type=search_type
+                )
 
                 # Generate query embedding
                 query_embedding = await self.embedding_service.generate_embedding(query)

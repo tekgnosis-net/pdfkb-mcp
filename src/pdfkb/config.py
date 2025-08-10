@@ -49,11 +49,27 @@ class ServerConfig:
     web_host: str = "localhost"
     web_cors_origins: List[str] = field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"])
 
+    # Hybrid search configuration
+    enable_hybrid_search: bool = True
+    hybrid_search_weights: Dict[str, float] = field(
+        default_factory=lambda: {"vector": 0.6, "text": 0.4}  # Semantic search weight  # BM25 search weight
+    )
+    rrf_k: int = 60  # RRF constant parameter
+
+    # Whoosh-specific configuration
+    whoosh_index_dir: str = ""  # Auto-set to cache_dir/whoosh
+    whoosh_analyzer: str = "standard"  # Whoosh analyzer type
+    whoosh_min_score: float = 0.0  # Minimum BM25 score threshold
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         # Set cache_dir relative to knowledgebase_path if not explicitly provided
         if not self.cache_dir or self.cache_dir == Path(""):
             self.cache_dir = self.knowledgebase_path / ".cache"
+
+        # Set whoosh_index_dir if not explicitly provided
+        if not self.whoosh_index_dir:
+            self.whoosh_index_dir = str(self.cache_dir / "whoosh")
 
         self._validate_config()
         self._ensure_directories()
@@ -109,6 +125,21 @@ class ServerConfig:
         if not self.web_host:
             raise ConfigurationError("web_host cannot be empty")
 
+        # Validate hybrid search configuration
+        if self.enable_hybrid_search:
+            if "vector" not in self.hybrid_search_weights or "text" not in self.hybrid_search_weights:
+                raise ConfigurationError("hybrid_search_weights must contain 'vector' and 'text' keys")
+
+            total_weight = self.hybrid_search_weights["vector"] + self.hybrid_search_weights["text"]
+            if abs(total_weight - 1.0) > 0.001:  # Allow small floating point errors
+                raise ConfigurationError("hybrid_search_weights must sum to 1.0")
+
+            if self.rrf_k <= 0:
+                raise ConfigurationError("rrf_k must be positive")
+
+            if self.whoosh_min_score < 0 or self.whoosh_min_score > 1:
+                raise ConfigurationError("whoosh_min_score must be between 0 and 1")
+
     def _ensure_directories(self) -> None:
         """Ensure required directories exist."""
         try:
@@ -119,6 +150,10 @@ class ServerConfig:
             (self.cache_dir / "chroma").mkdir(exist_ok=True)
             (self.cache_dir / "metadata").mkdir(exist_ok=True)
             (self.cache_dir / "processing").mkdir(exist_ok=True)
+
+            # Create whoosh directory if hybrid search is enabled
+            if self.enable_hybrid_search:
+                Path(self.whoosh_index_dir).mkdir(parents=True, exist_ok=True)
 
         except Exception as e:
             raise ConfigurationError(f"Failed to create directories: {e}")
@@ -422,6 +457,25 @@ class ServerConfig:
             logger.warning("WEB_CORS_ORIGINS is deprecated, use PDFKB_WEB_CORS_ORIGINS instead")
         if web_cors_origins:
             config_kwargs["web_cors_origins"] = [origin.strip() for origin in web_cors_origins.split(",")]
+
+        # Parse hybrid search configuration
+        if enable_hybrid := os.getenv("PDFKB_ENABLE_HYBRID_SEARCH"):
+            config_kwargs["enable_hybrid_search"] = enable_hybrid.lower() in ["true", "1", "yes"]
+
+        vector_weight = os.getenv("PDFKB_HYBRID_VECTOR_WEIGHT")
+        text_weight = os.getenv("PDFKB_HYBRID_TEXT_WEIGHT")
+        if vector_weight and text_weight:
+            try:
+                config_kwargs["hybrid_search_weights"] = {"vector": float(vector_weight), "text": float(text_weight)}
+            except ValueError:
+                raise ConfigurationError(f"Invalid hybrid search weights: vector={vector_weight}, text={text_weight}")
+
+        rrf_k = os.getenv("PDFKB_RRF_K")
+        if rrf_k:
+            try:
+                config_kwargs["rrf_k"] = int(rrf_k)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_RRF_K: {rrf_k}")
 
         return cls(**config_kwargs)
 

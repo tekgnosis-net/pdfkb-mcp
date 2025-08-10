@@ -305,12 +305,25 @@ class PDFProcessor:
             checksum: File checksum for validation.
         """
         try:
+            # Clean metadata to ensure it's JSON serializable
+            cleaned_metadata = {}
+            if parse_result.metadata:
+                for key, value in parse_result.metadata.items():
+                    try:
+                        # Test if the value is JSON serializable
+                        json.dumps(value)
+                        cleaned_metadata[key] = value
+                    except (TypeError, ValueError):
+                        # Skip non-serializable values
+                        logger.debug(f"Skipping non-serializable metadata field in parsing cache: {key}")
+                        continue
+
             cache_data = {
                 "checksum": checksum,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "parsing_fingerprint": (self.cache_manager.get_parsing_fingerprint() if self.cache_manager else None),
                 "markdown_content": parse_result.markdown_content,
-                "metadata": parse_result.metadata,
+                "metadata": cleaned_metadata,
             }
 
             cache_path = self._get_parsing_cache_path(file_path)
@@ -385,6 +398,21 @@ class PDFProcessor:
                 chunk_dict = chunk.to_dict()
                 # Remove embedding to save space (will be regenerated if needed)
                 chunk_dict.pop("embedding", None)
+
+                # Clean metadata to ensure it's JSON serializable
+                if "metadata" in chunk_dict and chunk_dict["metadata"]:
+                    cleaned_metadata = {}
+                    for key, value in chunk_dict["metadata"].items():
+                        try:
+                            # Test if the value is JSON serializable
+                            json.dumps(value)
+                            cleaned_metadata[key] = value
+                        except (TypeError, ValueError):
+                            # Skip non-serializable values
+                            logger.debug(f"Skipping non-serializable metadata field in chunk cache: {key}")
+                            continue
+                    chunk_dict["metadata"] = cleaned_metadata
+
                 chunks_data.append(chunk_dict)
 
             cache_data = {

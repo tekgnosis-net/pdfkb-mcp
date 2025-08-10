@@ -1,5 +1,6 @@
 """PDF parser using the Marker library."""
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -51,7 +52,13 @@ class MarkerPDFParser(PDFParser):
             logger.debug(f"Partitioning PDF with Marker: {file_path}")
 
             # Prepare configuration for Marker
-            marker_config = {}
+            marker_config = {
+                "output_format": "markdown",  # Specify output format to avoid KeyError
+                "parallel_factor": 1,  # Process pages sequentially to reduce memory usage
+                "disable_ocr": False,  # Allow OCR but can be disabled if needed
+                "debug": False,  # Disable debug mode for better performance
+                # Table recognition will be attempted, but we have a fallback if it fails
+            }
 
             # Configure LLM if enabled
             if self.config.get("use_llm", False):
@@ -80,7 +87,77 @@ class MarkerPDFParser(PDFParser):
                 renderer=config_parser.get_renderer(),
                 llm_service=(config_parser.get_llm_service() if marker_config.get("use_llm") else None),
             )
-            rendered = converter(str(file_path))
+
+            # Run the blocking Marker conversion in a thread executor to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+
+            def run_marker_conversion():
+                """Run the Marker conversion synchronously."""
+                logger.info(f"Starting Marker conversion for {file_path.name}")
+                try:
+                    # Suppress verbose output from Marker by redirecting tqdm
+                    import os
+                    from contextlib import redirect_stderr
+                    from io import StringIO
+
+                    # Capture output to reduce verbosity
+                    with redirect_stderr(StringIO()):
+                        # Keep stdout for important messages but reduce tqdm verbosity
+                        old_env = os.environ.get("TQDM_DISABLE")
+                        try:
+                            # Reduce tqdm verbosity
+                            os.environ["TQDM_DISABLE"] = "0"  # Keep tqdm but less verbose
+                            rendered = converter(str(file_path))
+                        finally:
+                            if old_env is not None:
+                                os.environ["TQDM_DISABLE"] = old_env
+                            elif "TQDM_DISABLE" in os.environ:
+                                del os.environ["TQDM_DISABLE"]
+                    return rendered
+                except RuntimeError as e:
+                    if "stack expects a non-empty TensorList" in str(e):
+                        logger.warning(
+                            f"Table recognition failed for {file_path.name}, retrying without table recognition"
+                        )
+                        # Retry without table recognition
+                        marker_config["disable_table_rec"] = True
+                        config_parser_retry = ConfigParser(marker_config)
+                        converter_retry = PdfConverter(
+                            config=config_parser_retry.generate_config_dict(),
+                            artifact_dict=create_model_dict(),
+                            processor_list=config_parser_retry.get_processors(),
+                            renderer=config_parser_retry.get_renderer(),
+                            llm_service=(
+                                config_parser_retry.get_llm_service() if marker_config.get("use_llm") else None
+                            ),
+                        )
+                        with redirect_stderr(StringIO()):
+                            old_env = os.environ.get("TQDM_DISABLE")
+                            try:
+                                os.environ["TQDM_DISABLE"] = "0"
+                                rendered = converter_retry(str(file_path))
+                            finally:
+                                if old_env is not None:
+                                    os.environ["TQDM_DISABLE"] = old_env
+                                elif "TQDM_DISABLE" in os.environ:
+                                    del os.environ["TQDM_DISABLE"]
+                        return rendered
+                    else:
+                        logger.error(f"Marker conversion failed: {e}")
+                        raise
+                except Exception as e:
+                    logger.error(f"Marker conversion failed: {e}")
+                    raise
+
+            # Run with a timeout to prevent hanging
+            try:
+                rendered = await asyncio.wait_for(
+                    loop.run_in_executor(None, run_marker_conversion), timeout=300  # 5 minute timeout
+                )
+                logger.info(f"Marker conversion completed for {file_path.name}")
+            except asyncio.TimeoutError:
+                raise RuntimeError(f"Marker conversion timed out after 5 minutes for {file_path.name}")
+
             markdown_content, _, _ = text_from_rendered(rendered)
 
             # Extract metadata from rendered output

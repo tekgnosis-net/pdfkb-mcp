@@ -24,6 +24,14 @@ class VectorStore:
         self.collection = None
         self.collection_name = "pdf_knowledgebase"
         self._embedding_service = None
+        self.text_index = None
+        self.hybrid_engine = None
+
+        # Initialize text index if hybrid search is enabled
+        if config.enable_hybrid_search:
+            from .text_index import TextIndex
+
+            self.text_index = TextIndex(config)
 
     def set_embedding_service(self, embedding_service) -> None:
         """Set the embedding service for query embeddings.
@@ -50,6 +58,14 @@ class VectorStore:
                 name=self.collection_name, metadata={"description": "PDF Knowledgebase documents"}
             )
             logger.info(f"Collection '{self.collection_name}' ready")
+
+            # Initialize text index and hybrid engine if enabled
+            if self.text_index:
+                await self.text_index.initialize()
+                from .hybrid_search import HybridSearchEngine
+
+                self.hybrid_engine = HybridSearchEngine(self, self.text_index, self.config)
+                logger.info("Hybrid search engine initialized")
 
             logger.info("Vector store initialized successfully")
 
@@ -111,6 +127,10 @@ class VectorStore:
                 f"(skipped {skipped_count} duplicates)"
             )
 
+            # Add to text index if hybrid search enabled
+            if self.text_index:
+                await self.text_index.add_document(document)
+
         except Exception as e:
             raise VectorStoreError(f"Failed to add document to vector store: {e}", "add", e)
 
@@ -148,6 +168,27 @@ class VectorStore:
             return chunks
 
     async def search(self, query: SearchQuery, query_embedding: List[float]) -> List[SearchResult]:
+        """Search for similar chunks using the specified search type.
+
+        Args:
+            query: Search query parameters.
+            query_embedding: Query embedding vector.
+
+        Returns:
+            List of search results ordered by score.
+        """
+        # Route search based on query type and configuration
+        if not self.config.enable_hybrid_search or query.search_type == "vector":
+            return await self._vector_search(query, query_embedding)
+        elif query.search_type == "text" and self.text_index:
+            return await self._text_search(query)
+        elif query.search_type == "hybrid" and self.hybrid_engine:
+            return await self.hybrid_engine.search(query, query_embedding)
+        else:
+            # Fall back to vector search
+            return await self._vector_search(query, query_embedding)
+
+    async def _vector_search(self, query: SearchQuery, query_embedding: List[float]) -> List[SearchResult]:
         """Search for similar chunks using vector similarity.
 
         Args:
@@ -203,6 +244,57 @@ class VectorStore:
         except Exception as e:
             raise VectorStoreError(f"Failed to search vector store: {e}", "search", e)
 
+    async def _text_search(self, query: SearchQuery) -> List[SearchResult]:
+        """Search using text/BM25 search only.
+
+        Args:
+            query: Search query parameters.
+
+        Returns:
+            List of text search results.
+        """
+        try:
+            if self.text_index is None:
+                logger.warning("Text search requested but text index not available")
+                return []
+
+            # Perform text search
+            text_results = await self.text_index.search(query.query, query.limit)
+
+            # Convert text results to SearchResult objects
+            search_results = []
+            for text_result in text_results:
+                chunk = Chunk(
+                    id=text_result["chunk_id"],
+                    document_id=text_result["document_id"],
+                    text=text_result["text"],
+                    page_number=text_result.get("page_number"),
+                    chunk_index=text_result.get("chunk_index", 0),
+                    metadata=text_result.get("metadata", {}),
+                )
+
+                # Try to get full document info from vector store
+                document = Document(id=text_result["document_id"], path="", chunks=[])
+
+                # Apply min_score filter
+                if text_result["score"] >= query.min_score:
+                    search_results.append(
+                        SearchResult(
+                            chunk=chunk,
+                            score=text_result["score"],
+                            document=document,
+                            search_type="text",
+                            text_score=text_result["score"],
+                        )
+                    )
+
+            logger.info(f"Text search found {len(search_results)} results")
+            return search_results
+
+        except Exception as e:
+            logger.error(f"Text search failed: {e}")
+            return []
+
     async def delete_document(self, document_id: str) -> None:
         """Delete all chunks for a document from the vector store.
 
@@ -217,6 +309,10 @@ class VectorStore:
             self.collection.delete(where={"document_id": document_id})
 
             logger.info(f"Deleted document {document_id} from vector store")
+
+            # Delete from text index if hybrid search enabled
+            if self.text_index:
+                await self.text_index.delete_document(document_id)
 
         except Exception as e:
             raise VectorStoreError(f"Failed to delete document from vector store: {e}", "delete", e)
@@ -245,6 +341,10 @@ class VectorStore:
             if chunk_count > 0:
                 self.collection.delete(where={"document_id": document_id})
                 logger.info(f"Removed {chunk_count} chunks for document {document_id}")
+
+                # Remove from text index if hybrid search enabled
+                if self.text_index:
+                    await self.text_index.delete_document(document_id)
             else:
                 logger.info(f"No chunks found for document {document_id}")
 
@@ -610,15 +710,25 @@ class VectorStore:
 
             logger.info(f"Created new collection '{self.collection_name}'")
 
+            # Reset text index if hybrid search enabled
+            if self.text_index:
+                await self.text_index.reset_index()
+                logger.info("Reset text index")
+
         except Exception as e:
             raise VectorStoreError(f"Failed to reset vector database: {e}", "reset", e)
 
     async def close(self) -> None:
         """Close the vector store connection."""
         try:
+            # Close text index if hybrid search enabled
+            if self.text_index:
+                await self.text_index.close()
+
             # Chroma client doesn't require explicit closing
             self.client = None
             self.collection = None
+            self.hybrid_engine = None
             logger.info("Vector store closed")
 
         except Exception as e:
