@@ -52,6 +52,7 @@ dependencies = [
     # Web interface core dependencies
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
+    "wsproto>=1.2.0",  # WebSocket protocol implementation (non-deprecated)
     "python-multipart>=0.0.6",
     "websockets>=12.0",
     "pydantic>=2.5.0",
@@ -119,6 +120,11 @@ langchain = [
     "langchain-text-splitters>=0.3.9",
 ]
 
+semantic = [
+    "langchain-experimental>=0.3.0",
+    "langchain-text-splitters>=0.3.9",
+]
+
 mineru = [
     "mineru[pipeline]>=2.1.10",
 ]
@@ -181,13 +187,15 @@ pdfkb-mcp = "pdfkb.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pdfkb"]
+only-include = ["src/pdfkb", "src/webui"]
 
 [tool.hatch.version]
 path = "src/pdfkb/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/src",
+    "/src/pdfkb",
+    "/src/webui",
     "/tests",
     "/docs",
     "/README.md",

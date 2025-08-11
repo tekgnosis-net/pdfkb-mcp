@@ -33,6 +33,7 @@ class PDFProcessor:
         config: ServerConfig,
         embedding_service: Any,
         cache_manager: Optional[Any] = None,
+        embedding_semaphore: Optional[asyncio.Semaphore] = None,
     ):
         """Initialize the PDF processor.
 
@@ -40,10 +41,12 @@ class PDFProcessor:
             config: Server configuration.
             embedding_service: Service for generating embeddings.
             cache_manager: Optional intelligent cache manager for selective processing.
+            embedding_semaphore: Optional semaphore to limit concurrent embedding operations.
         """
         self.config = config
         self.embedding_service = embedding_service
         self.cache_manager = cache_manager
+        self.embedding_semaphore = embedding_semaphore or asyncio.Semaphore(1)
         self.parser = self._create_parser()
         self.chunker = self._create_chunker()
 
@@ -245,22 +248,28 @@ class PDFProcessor:
         # Get chunker type, with "langchain" as the actual default (matching config.py)
         chunker_type = getattr(self.config, "pdf_chunker", "langchain")
 
-        if chunker_type == "langchain":
+        if chunker_type == "semantic":
             try:
-                return LangChainChunker(chunk_size=self.config.chunk_size, chunk_overlap=self.config.chunk_overlap)
+                from .chunker.chunker_semantic import SemanticChunker
+
+                return SemanticChunker(
+                    embedding_service=self.embedding_service,
+                    breakpoint_threshold_type=self.config.semantic_chunker_threshold_type,
+                    breakpoint_threshold_amount=self.config.semantic_chunker_threshold_amount,
+                    buffer_size=self.config.semantic_chunker_buffer_size,
+                    number_of_chunks=self.config.semantic_chunker_number_of_chunks,
+                    sentence_split_regex=self.config.semantic_chunker_sentence_split_regex,
+                    min_chunk_size=self.config.semantic_chunker_min_chunk_size,
+                    min_chunk_chars=self.config.semantic_chunker_min_chunk_chars,
+                )
             except ImportError as e:
                 logger.warning(
-                    f"LangChain chunker not available ({e}). Falling back to Unstructured chunker. "
-                    "To enable LangChain, install: pip install pdfkb-mcp[langchain]"
+                    f"Semantic chunker not available ({e}). Falling back to LangChain chunker. "
+                    "To enable semantic chunking, install: pip install 'pdfkb-mcp[semantic]'"
                 )
-                # Fallback to Unstructured if available
-                try:
-                    return ChunkerUnstructured()
-                except ImportError:
-                    raise PDFProcessingError(
-                        "No chunker available. Install one of: "
-                        "pip install pdfkb-mcp[langchain] or pip install pdfkb-mcp[unstructured_chunker]"
-                    )
+                return self._create_langchain_chunker()
+        elif chunker_type == "langchain":
+            return self._create_langchain_chunker()
         elif chunker_type == "unstructured":
             try:
                 return ChunkerUnstructured()
@@ -271,7 +280,31 @@ class PDFProcessor:
                     "To enable Unstructured, install: pip install pdfkb-mcp[unstructured_chunker]"
                 )
         else:
-            raise PDFProcessingError(f"Unknown chunker type: {chunker_type}. Must be 'langchain' or 'unstructured'")
+            raise PDFProcessingError(
+                f"Unknown chunker type: {chunker_type}. Must be 'langchain', 'unstructured', or 'semantic'"
+            )
+
+    def _create_langchain_chunker(self) -> Chunker:
+        """Create LangChain chunker with fallback to Unstructured.
+
+        Returns:
+            Chunker instance.
+        """
+        try:
+            return LangChainChunker(chunk_size=self.config.chunk_size, chunk_overlap=self.config.chunk_overlap)
+        except ImportError as e:
+            logger.warning(
+                f"LangChain chunker not available ({e}). Falling back to Unstructured chunker. "
+                "To enable LangChain, install: pip install pdfkb-mcp[langchain]"
+            )
+            # Fallback to Unstructured if available
+            try:
+                return ChunkerUnstructured()
+            except ImportError:
+                raise PDFProcessingError(
+                    "No chunker available. Install one of: "
+                    "pip install pdfkb-mcp[langchain] or pip install pdfkb-mcp[unstructured_chunker]"
+                )
 
     def _get_document_cache_dir(self, file_path: Path) -> Path:
         """Get the cache directory for a specific document.
@@ -685,8 +718,9 @@ class PDFProcessor:
             # Extract text from chunks
             texts = [chunk.text for chunk in document.chunks]
 
-            # Generate embeddings in batches
-            embeddings = await self.embedding_service.generate_embeddings(texts)
+            # Generate embeddings in batches with semaphore to limit parallelism
+            async with self.embedding_semaphore:
+                embeddings = await self.embedding_service.generate_embeddings(texts)
 
             # Assign embeddings to chunks
             for chunk, embedding in zip(document.chunks, embeddings):

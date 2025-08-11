@@ -129,6 +129,7 @@ class TestDoclingIntegration:
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
                 "PDFKB_PDF_PARSER": "docling",
+                "PDFKB_PDF_CHUNKER": "langchain",
             },
             clear=True,
         ):

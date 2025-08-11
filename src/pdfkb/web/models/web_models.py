@@ -1,12 +1,20 @@
 """Web-specific request/response models for FastAPI endpoints."""
 
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...background_queue import JobStatus
+
+
+def utc_now() -> datetime:
+    """Get current UTC datetime in timezone-aware format.
+
+    Replaces deprecated datetime.utcnow() with the recommended approach.
+    """
+    return datetime.now(timezone.utc)
 
 
 class ProcessingStatus(str, enum.Enum):
@@ -215,7 +223,7 @@ class WebsocketMessage(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
     event_type: WebsocketEventType = Field(..., description="Event type")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Event timestamp")
+    timestamp: datetime = Field(default_factory=utc_now, description="Event timestamp")
     data: Dict[str, Any] = Field(default_factory=dict, description="Event data")
     message: Optional[str] = Field(None, description="Human-readable message")
     client_id: Optional[str] = Field(None, description="Target client ID (for unicast)")
@@ -225,7 +233,7 @@ class HealthCheckResponse(BaseModel):
     """Response model for health check endpoint."""
 
     status: str = Field(default="ok", description="Health status")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Check timestamp")
+    timestamp: datetime = Field(default_factory=utc_now, description="Check timestamp")
     version: Optional[str] = Field(None, description="Application version")
 
 

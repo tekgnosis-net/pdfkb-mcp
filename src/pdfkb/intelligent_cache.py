@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -61,6 +61,19 @@ class IntelligentCacheManager:
             "pdf_chunker": self.config.pdf_chunker,
         }
 
+        # Add semantic chunker config if using semantic chunking
+        if self.config.pdf_chunker == "semantic":
+            chunking_params.update(
+                {
+                    "semantic_threshold_type": self.config.semantic_chunker_threshold_type,
+                    "semantic_threshold_amount": self.config.semantic_chunker_threshold_amount,
+                    "semantic_buffer_size": self.config.semantic_chunker_buffer_size,
+                    "semantic_min_chunk_chars": self.config.semantic_chunker_min_chunk_chars,
+                    "semantic_number_of_chunks": self.config.semantic_chunker_number_of_chunks,
+                    "semantic_sentence_split_regex": self.config.semantic_chunker_sentence_split_regex,
+                }
+            )
+
         fingerprint_string = json.dumps(chunking_params, sort_keys=True)
         return hashlib.sha256(fingerprint_string.encode("utf-8")).hexdigest()
 
@@ -102,7 +115,7 @@ class IntelligentCacheManager:
         try:
             fingerprint_data = {
                 "fingerprint": fingerprint,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "config_version": "1.0.0",  # Version for future compatibility
                 "config": config_params,
             }
@@ -190,6 +203,20 @@ class IntelligentCacheManager:
             "chunk_overlap": self.config.chunk_overlap,
             "pdf_chunker": self.config.pdf_chunker,
         }
+
+        # Add semantic chunker config if using semantic chunking
+        if self.config.pdf_chunker == "semantic":
+            chunking_config.update(
+                {
+                    "semantic_threshold_type": self.config.semantic_chunker_threshold_type,
+                    "semantic_threshold_amount": self.config.semantic_chunker_threshold_amount,
+                    "semantic_buffer_size": self.config.semantic_chunker_buffer_size,
+                    "semantic_min_chunk_chars": self.config.semantic_chunker_min_chunk_chars,
+                    "semantic_number_of_chunks": self.config.semantic_chunker_number_of_chunks,
+                    "semantic_sentence_split_regex": self.config.semantic_chunker_sentence_split_regex,
+                }
+            )
+
         self._save_stage_fingerprint("chunking", self.get_chunking_fingerprint(), chunking_config)
 
         # Save embedding fingerprint

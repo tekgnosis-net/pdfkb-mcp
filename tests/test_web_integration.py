@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import os
 import tempfile
 from pathlib import Path
 
@@ -25,19 +24,25 @@ class TestWebIntegration:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
-            # Set required environment variables
-            os.environ["OPENAI_API_KEY"] = "sk-test-key-for-testing-only-not-real"
-            os.environ["KNOWLEDGEBASE_PATH"] = str(temp_path / "pdfs")
-            os.environ["CACHE_DIR"] = str(temp_path / "cache")
-            os.environ["WEB_ENABLED"] = "true"
-            os.environ["WEB_PORT"] = "8081"  # Use different port for testing
-            os.environ["WEB_HOST"] = "127.0.0.1"
+            # Use patch.dict with clear=True to isolate from .env files
+            from unittest.mock import patch
 
-            yield ServerConfig.from_env()
-
-            # Clean up environment variables
-            for key in ["OPENAI_API_KEY", "KNOWLEDGEBASE_PATH", "CACHE_DIR", "WEB_ENABLED", "WEB_PORT", "WEB_HOST"]:
-                os.environ.pop(key, None)
+            with (
+                patch.dict(
+                    "os.environ",
+                    {
+                        "OPENAI_API_KEY": "sk-test-key-for-testing-only-not-real",
+                        "KNOWLEDGEBASE_PATH": str(temp_path / "pdfs"),
+                        "CACHE_DIR": str(temp_path / "cache"),
+                        "WEB_ENABLED": "true",
+                        "WEB_PORT": "8081",  # Use different port for testing
+                        "WEB_HOST": "127.0.0.1",
+                    },
+                    clear=True,
+                ),
+                patch("src.pdfkb.config.load_dotenv"),
+            ):  # Prevent reading .env file
+                yield ServerConfig.from_env()
 
     async def test_integrated_server_initialization(self, temp_config):
         """Test that the integrated server can be initialized."""
@@ -126,20 +131,43 @@ class TestWebIntegration:
         except ImportError as e:
             pytest.fail(f"Failed to import web server components: {e}")
 
-    async def test_configuration_validation(self, temp_config):
+    async def test_configuration_validation(self):
         """Test that web configuration validation works correctly."""
-        # Test valid configuration
-        assert temp_config.web_enabled is True
-        assert temp_config.web_port == 8081
-        assert temp_config.web_host == "127.0.0.1"
-        assert isinstance(temp_config.web_cors_origins, list)
+        import tempfile
+        from unittest.mock import patch
 
-        # Test invalid port configuration
-        with pytest.raises(Exception):  # Should raise ConfigurationError
-            ServerConfig(
-                openai_api_key="sk-test-key",
-                web_port=-1,  # Invalid port
-            )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Test valid configuration with isolated environment
+            with (
+                patch.dict(
+                    "os.environ",
+                    {
+                        "OPENAI_API_KEY": "sk-test-key-for-testing-only-not-real",
+                        "KNOWLEDGEBASE_PATH": str(temp_path / "pdfs"),
+                        "CACHE_DIR": str(temp_path / "cache"),
+                        "WEB_ENABLED": "true",
+                        "WEB_PORT": "8081",
+                        "WEB_HOST": "127.0.0.1",
+                    },
+                    clear=True,
+                ),
+                patch("src.pdfkb.config.load_dotenv"),
+            ):  # Prevent reading .env file
+                temp_config = ServerConfig.from_env()
+                assert temp_config.web_enabled is True
+                assert temp_config.web_port == 8081
+                assert temp_config.web_host == "127.0.0.1"
+                assert isinstance(temp_config.web_cors_origins, list)
+
+            # Test invalid port configuration with isolated environment
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-key"}, clear=True):
+                with pytest.raises(Exception):  # Should raise ConfigurationError
+                    ServerConfig(
+                        openai_api_key="sk-test-key",
+                        web_port=-1,  # Invalid port
+                    )
 
     async def test_web_models_creation(self):
         """Test that web models can be created and validated."""
@@ -309,51 +337,57 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
-            os.environ["OPENAI_API_KEY"] = "sk-test-key-for-testing-only-not-real"
-            os.environ["KNOWLEDGEBASE_PATH"] = str(temp_path / "pdfs")
-            os.environ["CACHE_DIR"] = str(temp_path / "cache")
-            os.environ["WEB_ENABLED"] = "true"
-            os.environ["WEB_PORT"] = "8081"
-            os.environ["WEB_HOST"] = "127.0.0.1"
+            from unittest.mock import patch
 
-            temp_config = ServerConfig.from_env()
+            with (
+                patch.dict(
+                    "os.environ",
+                    {
+                        "OPENAI_API_KEY": "sk-test-key-for-testing-only-not-real",
+                        "KNOWLEDGEBASE_PATH": str(temp_path / "pdfs"),
+                        "CACHE_DIR": str(temp_path / "cache"),
+                        "WEB_ENABLED": "true",
+                        "WEB_PORT": "8081",
+                        "WEB_HOST": "127.0.0.1",
+                    },
+                    clear=True,
+                ),
+                patch("src.pdfkb.config.load_dotenv"),
+            ):  # Prevent reading .env file
+                temp_config = ServerConfig.from_env()
 
-            print("Running web integration tests...")
+                print("Running web integration tests...")
 
-            try:
-                # Test imports
-                await test_instance.test_web_server_components_import()
-                print("✓ Import test passed")
+                try:
+                    # Test imports
+                    await test_instance.test_web_server_components_import()
+                    print("✓ Import test passed")
 
-                # Test models
-                await test_instance.test_web_models_creation()
-                print("✓ Models test passed")
+                    # Test models
+                    await test_instance.test_web_models_creation()
+                    print("✓ Models test passed")
 
-                # Test configuration
-                await test_instance.test_configuration_validation(temp_config)
-                print("✓ Configuration test passed")
+                    # Test configuration
+                    await test_instance.test_configuration_validation(temp_config)
+                    print("✓ Configuration test passed")
 
-                # Test server initialization
-                await test_instance.test_integrated_server_initialization(temp_config)
-                print("✓ Server initialization test passed")
+                    # Test server initialization
+                    await test_instance.test_integrated_server_initialization(temp_config)
+                    print("✓ Server initialization test passed")
 
-                # Test services initialization
-                await test_instance.test_web_services_initialization(temp_config)
-                print("✓ Services initialization test passed")
+                    # Test services initialization
+                    await test_instance.test_web_services_initialization(temp_config)
+                    print("✓ Services initialization test passed")
 
-                # Test FastAPI app creation
-                await test_instance.test_fastapi_app_creation(temp_config)
-                print("✓ FastAPI app creation test passed")
+                    # Test FastAPI app creation
+                    await test_instance.test_fastapi_app_creation(temp_config)
+                    print("✓ FastAPI app creation test passed")
 
-                print("\n🎉 All web integration tests passed!")
+                    print("\n🎉 All web integration tests passed!")
 
-            except Exception as e:
-                print(f"❌ Test failed: {e}")
-                raise
-            finally:
-                # Clean up
-                for key in ["OPENAI_API_KEY", "KNOWLEDGEBASE_PATH", "CACHE_DIR", "WEB_ENABLED", "WEB_PORT", "WEB_HOST"]:
-                    os.environ.pop(key, None)
+                except Exception as e:
+                    print(f"❌ Test failed: {e}")
+                    raise
 
     # Run the tests
     asyncio.run(run_tests())

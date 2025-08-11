@@ -57,6 +57,10 @@ class PDFKnowledgebaseServer:
         self._document_cache: Dict[str, Document] = {}
         self._cache_file = self.config.metadata_path / "documents.json"
 
+        # Semaphores for controlling parallel processing
+        self._parsing_semaphore = asyncio.Semaphore(self.config.max_parallel_parsing)
+        self._embedding_semaphore = asyncio.Semaphore(self.config.max_parallel_embedding)
+
         self._setup_tools()
         self._setup_resources()
 
@@ -79,7 +83,9 @@ class PDFKnowledgebaseServer:
             self.vector_store.set_embedding_service(self.embedding_service)
             await self.vector_store.initialize()
 
-            self.pdf_processor = PDFProcessor(self.config, self.embedding_service, self.cache_manager)
+            self.pdf_processor = PDFProcessor(
+                self.config, self.embedding_service, self.cache_manager, self._embedding_semaphore
+            )
 
             # Log startup configuration summary for diagnostics
             try:
@@ -368,8 +374,9 @@ class PDFKnowledgebaseServer:
                 logger.info(f"Adding document: {path}")
                 start_time = time.time()
 
-                # Process the PDF
-                result = await self.pdf_processor.process_pdf(file_path, metadata)
+                # Process the PDF with semaphore to limit parallelism
+                async with self._parsing_semaphore:
+                    result = await self.pdf_processor.process_pdf(file_path, metadata)
 
                 if not result.success:
                     logger.error(f"Failed to process PDF {path}: {result.error}")
@@ -992,7 +999,7 @@ Environment Variables:
   OPENAI_API_KEY          OpenAI API key (required)
   KNOWLEDGEBASE_PATH      Path to PDF directory (default: ./pdfs)
   CACHE_DIR              Cache directory (default: <KNOWLEDGEBASE_PATH>/.cache)
-  PDFKB_ENABLE_WEB       Enable web interface (1/true/yes to enable, default: true)
+  PDFKB_WEB_ENABLE       Enable web interface (1/true/yes to enable, default: false)
   WEB_PORT               Web server port (default: 8080)
   WEB_HOST               Web server host (default: localhost)
   PDF_PARSER             PDF parser to use (default: pymupdf4llm)
@@ -1000,8 +1007,8 @@ Environment Variables:
   LOG_LEVEL              Logging level (default: INFO)
 
 Examples:
-  pdfkb-mcp                          # Run with default settings (MCP + Web enabled)
-  PDFKB_ENABLE_WEB=false pdfkb-mcp   # Run MCP server only (disable web interface)
+  pdfkb-mcp                          # Run with default settings (MCP only, web disabled)
+  PDFKB_WEB_ENABLE=true pdfkb-mcp    # Run with web interface enabled
   pdfkb-mcp --config myconfig.env    # Use custom config file
         """,
     )
@@ -1010,6 +1017,7 @@ Examples:
 
     parser.add_argument("--port", type=int, help="Override MCP server port (for stdio mode, this has no effect)")
 
+    parser.add_argument("--enable-web", action="store_true", help="Enable web interface")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Override logging level")
 
     parser.add_argument("--version", action="version", version=f'pdfkb-mcp {__import__("pdfkb").__version__}')
@@ -1026,7 +1034,9 @@ Examples:
     # Load main configuration
     config = ServerConfig.from_env()
 
-    # Override log level if specified
+    # Override configuration from command line arguments
+    if args.enable_web:
+        config.web_enabled = True
     if args.log_level:
         config.log_level = args.log_level
 

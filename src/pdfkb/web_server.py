@@ -46,13 +46,18 @@ class IntegratedPDFKnowledgebaseServer:
 
             # Initialize background queue first if web is enabled
             if self.config.web_enabled:
-                logger.info("Initializing background processing queue with thread pool...")
-                self.background_queue = BackgroundProcessingQueue(
-                    concurrency=4,  # Allow up to 4 concurrent jobs
-                    max_retries=3,
-                    thread_pool_size=2,  # Use 2 threads for CPU-intensive PDF processing
+                logger.info(
+                    f"Initializing background processing queue with {self.config.background_queue_workers} workers..."
                 )
-                logger.info("Background processing queue initialized for non-blocking PDF processing")
+                self.background_queue = BackgroundProcessingQueue(
+                    concurrency=self.config.background_queue_workers,  # Use configured number of workers
+                    max_retries=3,
+                    thread_pool_size=self.config.thread_pool_size,  # Use configured thread pool size
+                )
+                logger.info(
+                    f"Background processing queue initialized with {self.config.background_queue_workers} workers "
+                    f"and {self.config.thread_pool_size} thread pool size"
+                )
 
             # Initialize MCP server with background queue (this sets up all core components)
             self.mcp_server = PDFKnowledgebaseServer(self.config, background_queue=self.background_queue)
@@ -199,6 +204,7 @@ class IntegratedPDFKnowledgebaseServer:
             import uvicorn
 
             # Create uvicorn config
+            # Use wsproto for WebSocket to avoid deprecated websockets.legacy warning
             uvicorn_config = uvicorn.Config(
                 app=self.web_app,
                 host=self.config.web_host,
@@ -206,6 +212,7 @@ class IntegratedPDFKnowledgebaseServer:
                 log_level=self.config.log_level.lower(),
                 access_log=True,
                 loop="asyncio",
+                ws="wsproto",  # Use wsproto instead of deprecated websockets
             )
 
             # Run the web server
@@ -278,6 +285,7 @@ class IntegratedPDFKnowledgebaseServer:
             import uvicorn
 
             # Create uvicorn config
+            # Use wsproto for WebSocket to avoid deprecated websockets.legacy warning
             uvicorn_config = uvicorn.Config(
                 app=self.web_app,
                 host=self.config.web_host,
@@ -285,6 +293,7 @@ class IntegratedPDFKnowledgebaseServer:
                 log_level=self.config.log_level.lower(),
                 access_log=True,
                 loop="asyncio",
+                ws="wsproto",  # Use wsproto instead of deprecated websockets
             )
 
             # Create and run server
@@ -432,10 +441,10 @@ Environment Variables:
   LOG_LEVEL              Logging level (default: INFO)
 
 Examples:
-  pdfkb-web                          # Run both MCP and web servers
-  pdfkb-web --port 9000              # Use custom web port
+  pdfkb-web --enable-web             # Run both MCP and web servers
+  pdfkb-web --enable-web --port 9000 # Use custom web port with web enabled
   pdfkb-web --config myconfig.env    # Use custom config file
-  pdfkb-web --disable-web            # Run MCP server only (same as pdfkb-mcp)
+  pdfkb-web                          # Run MCP server only (web disabled by default)
         """,
     )
 
@@ -445,6 +454,7 @@ Examples:
 
     parser.add_argument("--host", type=str, help="Override web server host")
 
+    parser.add_argument("--enable-web", action="store_true", help="Enable web interface")
     parser.add_argument("--disable-web", action="store_true", help="Disable web interface (run MCP only)")
 
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Override logging level")
@@ -468,6 +478,8 @@ Examples:
         config.web_port = args.port
     if args.host:
         config.web_host = args.host
+    if args.enable_web:
+        config.web_enabled = True
     if args.disable_web:
         config.web_enabled = False
     if args.log_level:

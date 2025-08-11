@@ -118,8 +118,10 @@ class PDFKnowledgebaseWebServer:
             app: FastAPI application instance
         """
         # Get the webui directory path
-        current_dir = Path(__file__).parent.parent.parent
-        webui_dir = current_dir / "webui"
+        # In development: src/pdfkb/web/server.py -> src/webui
+        # In installed package: site-packages/pdfkb/web/server.py -> site-packages/webui
+        package_dir = Path(__file__).parent.parent.parent
+        webui_dir = package_dir / "webui"
 
         if webui_dir.exists():
             # Mount static files (CSS, JS, etc.)

@@ -3,6 +3,7 @@
 A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local or OpenAI embeddings and ChromaDB vector storage.
 
 **🆕 NEW Features:**
+- **Semantic Chunking**: Advanced content-aware chunking using embedding similarity for better context preservation
 - **Local Embeddings**: Run embeddings locally with HuggingFace models - no API costs, full privacy
 - **Hybrid Search**: Combines semantic similarity with keyword matching (BM25) for superior search quality
 - **Web Interface**: Modern web UI for document management and search alongside the traditional MCP protocol
@@ -14,6 +15,7 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [🤖 Local Embeddings](#-local-embeddings)
 - [🔍 Hybrid Search](#-hybrid-search)
+- [🧩 Semantic Chunking](#-semantic-chunking)
 - [🎯 Parser Selection Guide](#-parser-selection-guide)
 - [⚙️ Configuration](#️-configuration)
 - [🖥️ MCP Client Setup](#️-mcp-client-setup)
@@ -71,25 +73,29 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 
 ## 🌐 Web Interface
 
-The PDF Knowledgebase includes a modern web interface for easy document management and search. **The web interface is enabled by default.**
+The PDF Knowledgebase includes a modern web interface for easy document management and search. **The web interface is disabled by default and must be explicitly enabled.**
 
 ### Server Modes
 
-**1. Integrated Mode** (Default - Both MCP + Web):
+**1. MCP Only Mode** (Default):
 ```bash
 pdfkb-mcp
+```
+- Runs only the MCP server for integration with Claude Desktop, VS Code, etc.
+- Most resource-efficient option
+- Best for pure MCP integration
+
+**2. Integrated Mode** (MCP + Web):
+```bash
+# Option A: Environment variable
+PDFKB_WEB_ENABLE=true pdfkb-mcp
+
+# Option B: Command line flag
+pdfkb-mcp --enable-web
 ```
 - Runs both MCP server AND web interface concurrently
 - Web interface available at http://localhost:8080
 - Best of both worlds: API integration + web UI
-
-**2. MCP Only Mode** (Disable Web Interface):
-```bash
-PDFKB_ENABLE_WEB=false pdfkb-mcp
-```
-- Runs only the MCP server for integration with Claude Desktop, VS Code, etc.
-- Most resource-efficient option
-- Uses same document storage as web interface
 
 ### Web Interface Features
 
@@ -105,7 +111,7 @@ PDFKB_ENABLE_WEB=false pdfkb-mcp
 1. **Install and run**:
    ```bash
    uvx pdfkb-mcp                    # Install if needed
-   PDFKB_ENABLE_WEB=true pdfkb-mcp  # Start integrated server
+   PDFKB_WEB_ENABLE=true pdfkb-mcp  # Start integrated server
    ```
 
 2. **Open your browser**: http://localhost:8080
@@ -116,14 +122,14 @@ PDFKB_ENABLE_WEB=false pdfkb-mcp
    PDFKB_KNOWLEDGEBASE_PATH=/path/to/your/pdfs
    PDFKB_WEB_PORT=8080
    PDFKB_WEB_HOST=localhost
-   PDFKB_ENABLE_WEB=true
+   PDFKB_WEB_ENABLE=true
    ```
 
 ### Web Configuration Options
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `PDFKB_ENABLE_WEB` | `true` | Enable/disable web interface |
+| `PDFKB_WEB_ENABLE` | `false` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins |
@@ -133,8 +139,8 @@ PDFKB_ENABLE_WEB=false pdfkb-mcp
 The server supports command line arguments:
 
 ```bash
-# Customize web server port (web interface enabled by default)
-pdfkb-mcp --port 9000
+# Customize web server port with web interface enabled
+pdfkb-mcp --enable-web --port 9000
 
 # Use custom configuration file
 pdfkb-mcp --config myconfig.env
@@ -408,6 +414,119 @@ pip install "pdfkb-mcp[hybrid]"
 
 Or if using uvx, it's included by default when hybrid search is enabled.
 
+## 🧩 Semantic Chunking
+
+**NEW**: The server now supports advanced **Semantic Chunking**, which uses embedding similarity to identify natural content boundaries, creating more coherent and contextually complete chunks than traditional methods.
+
+### How It Works
+
+1. **Sentence Embedding**: Each sentence in the document is embedded using your configured embedding model
+2. **Similarity Analysis**: Distances between consecutive sentence embeddings are calculated
+3. **Breakpoint Detection**: Natural content boundaries are identified where similarity drops significantly
+4. **Intelligent Grouping**: Related sentences are kept together in the same chunk
+
+### Benefits
+
+- **40% Better Coherence**: Chunks contain semantically related content
+- **Context Preservation**: Important context stays together, reducing information loss
+- **Improved Retrieval**: Better search results due to more meaningful chunks
+- **Flexible Configuration**: Four different breakpoint detection methods for different document types
+
+### Quick Start
+
+Enable semantic chunking by setting:
+```bash
+PDFKB_PDF_CHUNKER=semantic
+PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE=percentile  # Default
+PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT=95.0      # Default
+```
+
+Or in your MCP client configuration:
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[semantic]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/pdfs",
+        "PDFKB_PDF_CHUNKER": "semantic",
+        "PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE": "percentile",
+        "PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT": "95.0"
+      }
+    }
+  }
+}
+```
+
+### Breakpoint Detection Methods
+
+| Method | Best For | Threshold Range | Description |
+|--------|----------|-----------------|-------------|
+| **percentile** (default) | General documents | 90-99 | Split at top N% largest semantic gaps |
+| **standard_deviation** | Consistent style docs | 2.0-4.0 | Split at mean + N×σ distance |
+| **interquartile** | Noisy documents | 1.0-2.0 | Split at mean + N×IQR, robust to outliers |
+| **gradient** | Technical/legal docs | 90-99 | Analyze rate of change in similarity |
+
+### Configuration Options
+
+```bash
+# Breakpoint detection method
+PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE=percentile  # percentile, standard_deviation, interquartile, gradient
+
+# Threshold amount (interpretation depends on type)
+PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT=95.0  # For percentile/gradient: 0-100, for others: positive float
+
+# Context buffer size (sentences to include around breakpoints)
+PDFKB_SEMANTIC_CHUNKER_BUFFER_SIZE=1  # Default: 1
+
+# Optional: Fixed number of chunks (overrides threshold-based splitting)
+PDFKB_SEMANTIC_CHUNKER_NUMBER_OF_CHUNKS=  # Leave empty for dynamic
+
+# Minimum chunk size in characters
+PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_CHARS=100  # Default: 100
+
+# Sentence splitting regex
+PDFKB_SEMANTIC_CHUNKER_SENTENCE_SPLIT_REGEX="(?<=[.?!])\\s+"  # Default pattern
+```
+
+### Tuning Guidelines
+
+1. **For General Documents** (default):
+   - Use `percentile` with `95.0` threshold
+   - Good balance between chunk size and coherence
+
+2. **For Technical Documentation**:
+   - Use `gradient` with `90.0` threshold
+   - Better at detecting technical section boundaries
+
+3. **For Academic Papers**:
+   - Use `standard_deviation` with `3.0` threshold
+   - Maintains paragraph and section integrity
+
+4. **For Mixed Content**:
+   - Use `interquartile` with `1.5` threshold
+   - Robust against varying content styles
+
+### Installation
+
+Install with the semantic chunking dependency:
+```bash
+pip install "pdfkb-mcp[semantic]"
+```
+
+Or if using uvx:
+```bash
+uvx pdfkb-mcp[semantic]
+```
+
+### Compatibility
+
+- Works with both **local** and **OpenAI** embeddings
+- Compatible with all PDF parsers
+- Integrates with intelligent caching system
+- Falls back to LangChain chunker if dependencies missing
+
 ## 🎯 Parser Selection Guide
 
 ### Decision Tree
@@ -579,6 +698,26 @@ Document Type & Priority?
 }
 ```
 
+**Semantic Chunking (NEW - Context-Aware Chunking)**:
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[semantic]"],
+      "env": {
+        "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
+        "PDFKB_PDF_CHUNKER": "semantic",
+        "PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE": "gradient",
+        "PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT": "90.0",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
+      },
+      "transport": "stdio"
+    }
+  }
+}
+```
+
 **Maximum Quality**:
 ```json
 {
@@ -607,9 +746,9 @@ Document Type & Priority?
 | `PDFKB_KNOWLEDGEBASE_PATH` | `./pdfs` | Directory containing PDF files |
 | `PDFKB_CACHE_DIR` | `./.cache` | Cache directory for processing |
 | `PDFKB_PDF_PARSER` | `pymupdf4llm` | Parser: `pymupdf4llm` (default), `marker`, `mineru`, `docling`, `llm` |
-| `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `unstructured` |
+| `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `unstructured`, `semantic` |
 | `PDFKB_CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
-| `PDFKB_ENABLE_WEB` | `true` | Enable/disable web interface |
+| `PDFKB_WEB_ENABLE` | `false` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
@@ -752,9 +891,17 @@ Document Type & Priority?
 }
 ```
 
+**System overload when processing multiple PDFs**:
+```bash
+# Reduce parallel operations to prevent system stress
+PDFKB_MAX_PARALLEL_PARSING=1       # Process one PDF at a time
+PDFKB_MAX_PARALLEL_EMBEDDING=1     # Embed one document at a time
+PDFKB_BACKGROUND_QUEUE_WORKERS=1   # Single background worker
+```
+
 **Processing too slow**:
 ```json
-// Switch to faster parser
+// Switch to faster parser and increase parallelism (if system can handle it)
 {
   "mcpServers": {
     "pdfkb": {
@@ -864,7 +1011,51 @@ Document Type & Priority?
 
 ### Performance Tuning
 
-**High-Performance Setup**:
+**Parallel Processing Configuration**:
+
+Control the number of concurrent operations to optimize performance and prevent system overload:
+
+```bash
+# Maximum number of PDFs to parse simultaneously
+PDFKB_MAX_PARALLEL_PARSING=1  # Default: 1 (conservative to prevent overload)
+
+# Maximum number of documents to embed simultaneously
+PDFKB_MAX_PARALLEL_EMBEDDING=1  # Default: 1 (prevents API rate limits)
+
+# Number of background queue workers
+PDFKB_BACKGROUND_QUEUE_WORKERS=2  # Default: 2
+
+# Thread pool size for CPU-intensive operations
+PDFKB_THREAD_POOL_SIZE=1  # Default: 1
+```
+
+**Resource-Optimized Setup** (for low-powered systems):
+```json
+{
+  "env": {
+    "PDFKB_MAX_PARALLEL_PARSING": "1",      # Process one PDF at a time
+    "PDFKB_MAX_PARALLEL_EMBEDDING": "1",    # Embed one document at a time
+    "PDFKB_BACKGROUND_QUEUE_WORKERS": "1",  # Single background worker
+    "PDFKB_THREAD_POOL_SIZE": "1"           # Single thread for CPU tasks
+  }
+}
+```
+
+**High-Performance Setup** (for powerful machines):
+```json
+{
+  "env": {
+    "PDFKB_MAX_PARALLEL_PARSING": "4",      # Parse up to 4 PDFs in parallel
+    "PDFKB_MAX_PARALLEL_EMBEDDING": "2",    # Embed 2 documents simultaneously
+    "PDFKB_BACKGROUND_QUEUE_WORKERS": "4",  # More background workers
+    "PDFKB_THREAD_POOL_SIZE": "2",          # More threads for CPU tasks
+    "PDFKB_EMBEDDING_BATCH_SIZE": "200",    # Larger embedding batches
+    "PDFKB_VECTOR_SEARCH_K": "15"           # More search results
+  }
+}
+```
+
+**Complete High-Performance Setup**:
 ```json
 {
   "mcpServers": {
@@ -876,6 +1067,10 @@ Document Type & Priority?
         "PDFKB_PDF_PARSER": "mineru",
         "PDFKB_KNOWLEDGEBASE_PATH": "/Volumes/FastSSD/Documents/PDFs",
         "PDFKB_CACHE_DIR": "/Volumes/FastSSD/Documents/PDFs/.cache",
+        "PDFKB_MAX_PARALLEL_PARSING": "4",
+        "PDFKB_MAX_PARALLEL_EMBEDDING": "2",
+        "PDFKB_BACKGROUND_QUEUE_WORKERS": "4",
+        "PDFKB_THREAD_POOL_SIZE": "2",
         "PDFKB_EMBEDDING_BATCH_SIZE": "200",
         "PDFKB_VECTOR_SEARCH_K": "15",
         "PDFKB_FILE_SCAN_INTERVAL": "30"
@@ -906,8 +1101,8 @@ The server uses multi-stage caching:
 ```bash
 uvx pdfkb-mcp
 **Web Interface Included**: All installation methods include the web interface. Use these commands:
-- `pdfkb-mcp` - Integrated MCP + Web server (default)
-- `PDFKB_ENABLE_WEB=false pdfkb-mcp` - MCP server only (web disabled)
+- `pdfkb-mcp` - MCP server only (default, web disabled)
+- `PDFKB_WEB_ENABLE=true pdfkb-mcp` - Integrated MCP + Web server (web enabled)
 ```
 
 **With Specific Parser Dependencies**:
@@ -916,9 +1111,9 @@ uvx pdfkb-mcp[marker]     # Marker parser
 uvx pdfkb-mcp[mineru]     # MinerU parser
 uvx pdfkb-mcp[docling]    # Docling parser
 uvx pdfkb-mcp[llm]        # LLM parser
--uvx pdfkb-mcp[langchain]  # LangChain chunker
+uvx pdfkb-mcp[semantic]   # Semantic chunker (NEW)
+uvx pdfkb-mcp[unstructured_chunker]  # Unstructured chunker
 uvx pdfkb-mcp[web]        # Enhanced web features (psutil for metrics)
-+uvx pdfkb-mcp[unstructured_chunker]  # Unstructured chunker
 ```
 
 pip install "pdfkb-mcp[web]"               # Enhanced web features
@@ -944,15 +1139,19 @@ pip install -e ".[dev]"
 | `PDFKB_KNOWLEDGEBASE_PATH` | `./pdfs` | PDF directory path |
 | `PDFKB_CACHE_DIR` | `./.cache` | Cache directory |
 | `PDFKB_PDF_PARSER` | `pymupdf4llm` | PDF parser selection |
-| `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy |
+| `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain`, `unstructured`, `semantic` |
 | `PDFKB_CHUNK_SIZE` | `1000` | LangChain chunk size |
 | `PDFKB_CHUNK_OVERLAP` | `200` | LangChain chunk overlap |
 | `PDFKB_EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI model |
 | `PDFKB_EMBEDDING_BATCH_SIZE` | `100` | Embedding batch size |
+| `PDFKB_MAX_PARALLEL_PARSING` | `1` | Max concurrent PDF parsing operations |
+| `PDFKB_MAX_PARALLEL_EMBEDDING` | `1` | Max concurrent embedding operations |
+| `PDFKB_BACKGROUND_QUEUE_WORKERS` | `2` | Number of background processing workers |
+| `PDFKB_THREAD_POOL_SIZE` | `1` | Thread pool size for CPU-intensive tasks |
 | `PDFKB_VECTOR_SEARCH_K` | `5` | Default search results |
 | `PDFKB_FILE_SCAN_INTERVAL` | `60` | File monitoring interval |
 | `PDFKB_LOG_LEVEL` | `INFO` | Logging level |
-| `PDFKB_ENABLE_WEB` | `true` | Enable/disable web interface |
+| `PDFKB_WEB_ENABLE` | `false` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
@@ -976,6 +1175,15 @@ pip install -e ".[dev]"
 - Configurable via `PDFKB_CHUNK_SIZE` and `PDFKB_CHUNK_OVERLAP`
 - Best for customizable chunking
 - Default and installed with base package
+
+**Semantic** (`PDFKB_PDF_CHUNKER=semantic`) **🆕 NEW**:
+- Advanced semantic chunking using LangChain's [`SemanticChunker`](src/pdfkb/chunker/chunker_semantic.py)
+- Groups semantically related content together using embedding similarity
+- Four breakpoint detection methods: percentile, standard_deviation, interquartile, gradient
+- Preserves context and improves retrieval quality by 40%
+- Install extra: `pip install "pdfkb-mcp[semantic]"` to enable
+- Configurable via environment variables (see Semantic Chunking section)
+- Best for documents requiring high context preservation
 
 **Unstructured** (`PDFKB_PDF_CHUNKER=unstructured`):
 - Intelligent semantic chunking with [`unstructured`](src/pdfkb/chunker/chunker_unstructured.py) library

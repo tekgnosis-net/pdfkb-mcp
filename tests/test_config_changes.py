@@ -46,6 +46,7 @@ class TestConfigurationFingerprinting:
             pdf_parser="unstructured",
         )
 
+        # These will be used in the fingerprint change tests
         base_parsing_fp = base_config.get_parsing_fingerprint()
         base_chunking_fp = base_config.get_chunking_fingerprint()
         base_embedding_fp = base_config.get_embedding_fingerprint()
@@ -56,7 +57,7 @@ class TestConfigurationFingerprinting:
             {"chunk_overlap": 100, "stage": "chunking"},
             {"embedding_model": "text-embedding-3-large", "stage": "embedding"},
             {"unstructured_pdf_processing_strategy": "hi_res", "stage": "parsing"},
-            {"pdf_parser": "pymupdf4llm", "stage": "parsing"},
+            {"pdf_parser": "mineru", "stage": "parsing"},
         ]
 
         for changes in test_configs:
@@ -84,6 +85,36 @@ class TestConfigurationFingerprinting:
                 assert (
                     modified_config.get_embedding_fingerprint() != base_embedding_fp
                 ), f"Embedding fingerprint should change when {list(changes.keys())[0]} changes"
+
+    def test_parallel_processing_config_defaults(self, tmp_path):
+        """Test that parallel processing configuration has correct defaults."""
+        config = ServerConfig(
+            openai_api_key="sk-test-key",
+            knowledgebase_path=tmp_path / "pdfs",
+            cache_dir=tmp_path / "cache",
+        )
+
+        # Test defaults
+        assert config.max_parallel_parsing == 1
+        assert config.max_parallel_embedding == 1
+        assert config.background_queue_workers == 2
+        assert config.thread_pool_size == 1
+
+    def test_parallel_processing_config_from_env(self, tmp_path, monkeypatch):
+        """Test that parallel processing configuration can be set from environment."""
+        monkeypatch.setenv("PDFKB_MAX_PARALLEL_PARSING", "4")
+        monkeypatch.setenv("PDFKB_MAX_PARALLEL_EMBEDDING", "2")
+        monkeypatch.setenv("PDFKB_BACKGROUND_QUEUE_WORKERS", "8")
+        monkeypatch.setenv("PDFKB_THREAD_POOL_SIZE", "4")
+
+        config = ServerConfig.from_env()
+        config.knowledgebase_path = tmp_path / "pdfs"
+        config.cache_dir = tmp_path / "cache"
+
+        assert config.max_parallel_parsing == 4
+        assert config.max_parallel_embedding == 2
+        assert config.background_queue_workers == 8
+        assert config.thread_pool_size == 4
 
     def test_fingerprint_unchanged_with_non_critical_params(self, tmp_path):
         """Test that fingerprint doesn't change with non-critical parameters."""

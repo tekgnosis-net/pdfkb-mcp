@@ -4,7 +4,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -57,8 +57,8 @@ class ServerConfig:
     mineru_lang: str = "en"
     mineru_method: str = "auto"
     mineru_vram: int = 16
-    # Web server configuration
-    web_enabled: bool = True
+    # Web server configuration (disabled by default)
+    web_enabled: bool = False
     web_port: int = 8080
     web_host: str = "localhost"
     web_cors_origins: List[str] = field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"])
@@ -74,6 +74,21 @@ class ServerConfig:
     whoosh_index_dir: str = ""  # Auto-set to cache_dir/whoosh
     whoosh_analyzer: str = "standard"  # Whoosh analyzer type
     whoosh_min_score: float = 0.0  # Minimum BM25 score threshold
+
+    # Semantic chunking configuration
+    semantic_chunker_threshold_type: str = "percentile"  # percentile, standard_deviation, interquartile, gradient
+    semantic_chunker_threshold_amount: float = 95.0
+    semantic_chunker_buffer_size: int = 1
+    semantic_chunker_number_of_chunks: Optional[int] = None
+    semantic_chunker_sentence_split_regex: str = r"(?<=[.?!])\s+"
+    semantic_chunker_min_chunk_size: Optional[int] = None
+    semantic_chunker_min_chunk_chars: Optional[int] = 100
+
+    # Parallel processing configuration
+    max_parallel_parsing: int = 1  # Max number of PDFs to parse simultaneously (default: 1 to prevent overload)
+    max_parallel_embedding: int = 1  # Max number of documents to embed simultaneously (default: 1 to prevent overload)
+    background_queue_workers: int = 2  # Total background queue workers
+    thread_pool_size: int = 1  # Thread pool size for CPU-intensive operations
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -147,8 +162,50 @@ class ServerConfig:
                 "pdf_parser must be either 'unstructured', 'pymupdf4llm', 'mineru', 'marker', 'docling', or 'llm'"
             )
 
-        if self.pdf_chunker not in ["langchain", "unstructured"]:
-            raise ConfigurationError("pdf_chunker must be either 'langchain' or 'unstructured'")
+        if self.pdf_chunker not in ["langchain", "unstructured", "semantic"]:
+            raise ConfigurationError("pdf_chunker must be 'langchain', 'unstructured', or 'semantic'")
+
+        # Validate semantic chunking configuration if using semantic chunker
+        if self.pdf_chunker == "semantic":
+            if self.semantic_chunker_threshold_type not in [
+                "percentile",
+                "standard_deviation",
+                "interquartile",
+                "gradient",
+            ]:
+                raise ConfigurationError(
+                    "semantic_chunker_threshold_type must be 'percentile', "
+                    "'standard_deviation', 'interquartile', or 'gradient'"
+                )
+
+            if self.semantic_chunker_threshold_type in ["percentile", "gradient"]:
+                if not 0 <= self.semantic_chunker_threshold_amount <= 100:
+                    raise ConfigurationError(
+                        "semantic_chunker_threshold_amount must be between 0 and 100 for percentile/gradient types"
+                    )
+            elif self.semantic_chunker_threshold_amount <= 0:
+                raise ConfigurationError(
+                    "semantic_chunker_threshold_amount must be positive for standard_deviation/interquartile types"
+                )
+
+            if self.semantic_chunker_buffer_size < 0:
+                raise ConfigurationError("semantic_chunker_buffer_size cannot be negative")
+
+            if self.semantic_chunker_min_chunk_chars is not None and self.semantic_chunker_min_chunk_chars <= 0:
+                raise ConfigurationError("semantic_chunker_min_chunk_chars must be positive if specified")
+
+        # Validate parallel processing configuration
+        if self.max_parallel_parsing <= 0:
+            raise ConfigurationError("max_parallel_parsing must be positive")
+
+        if self.max_parallel_embedding <= 0:
+            raise ConfigurationError("max_parallel_embedding must be positive")
+
+        if self.background_queue_workers <= 0:
+            raise ConfigurationError("background_queue_workers must be positive")
+
+        if self.thread_pool_size <= 0:
+            raise ConfigurationError("thread_pool_size must be positive")
 
         # Validate web server configuration
         if self.web_port <= 0 or self.web_port > 65535:
@@ -522,14 +579,56 @@ class ServerConfig:
             logger.warning("PDF_CHUNKER is deprecated, use PDFKB_PDF_CHUNKER instead")
         if pdf_chunker:
             chunker = pdf_chunker.lower()
-            if chunker not in ["langchain", "unstructured"]:
+            if chunker not in ["langchain", "unstructured", "semantic"]:
                 raise ConfigurationError(
-                    f"Invalid PDFKB_PDF_CHUNKER: {pdf_chunker}. Must be 'langchain' or 'unstructured'"
+                    f"Invalid PDFKB_PDF_CHUNKER: {pdf_chunker}. Must be 'langchain', 'unstructured', or 'semantic'"
                 )
             config_kwargs["pdf_chunker"] = chunker
 
+        # Parse semantic chunking configuration
+        if semantic_threshold_type := os.getenv("PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE"):
+            config_kwargs["semantic_chunker_threshold_type"] = semantic_threshold_type
+
+        if semantic_threshold_amount := os.getenv("PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT"):
+            try:
+                config_kwargs["semantic_chunker_threshold_amount"] = float(semantic_threshold_amount)
+            except ValueError:
+                raise ConfigurationError(
+                    f"Invalid PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT: {semantic_threshold_amount}"
+                )
+
+        if semantic_buffer_size := os.getenv("PDFKB_SEMANTIC_CHUNKER_BUFFER_SIZE"):
+            try:
+                config_kwargs["semantic_chunker_buffer_size"] = int(semantic_buffer_size)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SEMANTIC_CHUNKER_BUFFER_SIZE: {semantic_buffer_size}")
+
+        if semantic_num_chunks := os.getenv("PDFKB_SEMANTIC_CHUNKER_NUMBER_OF_CHUNKS"):
+            try:
+                config_kwargs["semantic_chunker_number_of_chunks"] = int(semantic_num_chunks)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SEMANTIC_CHUNKER_NUMBER_OF_CHUNKS: {semantic_num_chunks}")
+
+        if semantic_split_regex := os.getenv("PDFKB_SEMANTIC_CHUNKER_SENTENCE_SPLIT_REGEX"):
+            config_kwargs["semantic_chunker_sentence_split_regex"] = semantic_split_regex
+
+        if semantic_min_chunk_size := os.getenv("PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_SIZE"):
+            try:
+                config_kwargs["semantic_chunker_min_chunk_size"] = int(semantic_min_chunk_size)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_SIZE: {semantic_min_chunk_size}")
+
+        if semantic_min_chunk_chars := os.getenv("PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_CHARS"):
+            try:
+                config_kwargs["semantic_chunker_min_chunk_chars"] = int(semantic_min_chunk_chars)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_CHARS: {semantic_min_chunk_chars}")
+
         # Parse web server configuration
-        if web_enabled := os.getenv("PDFKB_ENABLE_WEB"):
+        web_enabled = os.getenv("PDFKB_WEB_ENABLE") or os.getenv("WEB_ENABLED")
+        if os.getenv("WEB_ENABLED") and not os.getenv("PDFKB_WEB_ENABLE"):
+            logger.warning("WEB_ENABLED is deprecated, use PDFKB_WEB_ENABLE instead")
+        if web_enabled:
             config_kwargs["web_enabled"] = web_enabled.lower() in ["true", "1", "yes"]
 
         web_port = os.getenv("PDFKB_WEB_PORT") or os.getenv("WEB_PORT")
@@ -571,6 +670,31 @@ class ServerConfig:
                 config_kwargs["rrf_k"] = int(rrf_k)
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_RRF_K: {rrf_k}")
+
+        # Parse parallel processing configuration
+        if max_parallel_parsing := os.getenv("PDFKB_MAX_PARALLEL_PARSING"):
+            try:
+                config_kwargs["max_parallel_parsing"] = int(max_parallel_parsing)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_MAX_PARALLEL_PARSING: {max_parallel_parsing}")
+
+        if max_parallel_embedding := os.getenv("PDFKB_MAX_PARALLEL_EMBEDDING"):
+            try:
+                config_kwargs["max_parallel_embedding"] = int(max_parallel_embedding)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_MAX_PARALLEL_EMBEDDING: {max_parallel_embedding}")
+
+        if background_queue_workers := os.getenv("PDFKB_BACKGROUND_QUEUE_WORKERS"):
+            try:
+                config_kwargs["background_queue_workers"] = int(background_queue_workers)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_BACKGROUND_QUEUE_WORKERS: {background_queue_workers}")
+
+        if thread_pool_size := os.getenv("PDFKB_THREAD_POOL_SIZE"):
+            try:
+                config_kwargs["thread_pool_size"] = int(thread_pool_size)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_THREAD_POOL_SIZE: {thread_pool_size}")
 
         return cls(**config_kwargs)
 
