@@ -27,6 +27,20 @@ class ServerConfig:
     chunk_overlap: int = 200
     embedding_model: str = "text-embedding-3-large"
     embedding_batch_size: int = 100
+
+    # Embedding provider configuration
+    embedding_provider: str = "local"  # "local" or "openai"
+
+    # Local embedding configuration
+    local_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"  # High quality 0.6B model
+    local_embedding_batch_size: int = 32
+    embedding_device: str = ""  # Empty string for auto-detect, or "cpu"/"mps"/"cuda"
+    embedding_cache_size: int = 10000
+    max_sequence_length: int = 512
+    use_model_optimization: bool = False  # Disabled due to torch.compile issues
+    model_cache_dir: str = "~/.cache/pdfkb-mcp/models"
+    embedding_dimension: int = 0  # 0 uses model default
+    fallback_to_openai: bool = False
     vector_search_k: int = 5
     file_scan_interval: int = 60
     log_level: str = "INFO"
@@ -76,11 +90,18 @@ class ServerConfig:
 
     def _validate_config(self) -> None:
         """Validate configuration values."""
-        if not self.openai_api_key:
-            raise ConfigurationError("OPENAI_API_KEY is required")
-
-        if not self.openai_api_key.startswith("sk-"):
-            raise ConfigurationError("Invalid OpenAI API key format")
+        # OpenAI key is only required if using OpenAI embeddings
+        if self.embedding_provider == "openai":
+            if not self.openai_api_key:
+                raise ConfigurationError("OPENAI_API_KEY is required when using OpenAI embeddings")
+            if not self.openai_api_key.startswith("sk-"):
+                raise ConfigurationError("Invalid OpenAI API key format")
+        elif self.embedding_provider == "local":
+            # For local embeddings, we can use a dummy key
+            if not self.openai_api_key:
+                self.openai_api_key = "sk-local-embeddings-dummy-key"
+        else:
+            raise ConfigurationError(f"Invalid embedding_provider: {self.embedding_provider}")
 
         if self.chunk_size <= 0:
             raise ConfigurationError("chunk_size must be positive")
@@ -93,6 +114,17 @@ class ServerConfig:
 
         if self.embedding_batch_size <= 0:
             raise ConfigurationError("embedding_batch_size must be positive")
+
+        # Validate local embedding configuration
+        if self.embedding_provider == "local":
+            if self.local_embedding_batch_size <= 0:
+                raise ConfigurationError("local_embedding_batch_size must be positive")
+            if self.embedding_cache_size < 0:
+                raise ConfigurationError("embedding_cache_size cannot be negative")
+            if self.max_sequence_length <= 0:
+                raise ConfigurationError("max_sequence_length must be positive")
+            if self.embedding_device and self.embedding_device not in ["", "cpu", "cuda", "mps"]:
+                raise ConfigurationError("embedding_device must be 'cpu', 'cuda', 'mps', or empty for auto-detect")
 
         if self.vector_search_k <= 0:
             raise ConfigurationError("vector_search_k must be positive")
@@ -186,16 +218,28 @@ class ServerConfig:
             load_dotenv(env_file, override=False)  # Don't override existing env vars
             logger.info(f"Loaded environment variables from: {env_file}")
 
-        # Get required settings with PDFKB_ prefix support
+        # Check embedding provider first to determine if OpenAI key is required
+        embedding_provider = os.getenv("PDFKB_EMBEDDING_PROVIDER", "local").lower()
+
+        # Get OpenAI API key (optional for local embeddings)
         openai_api_key = os.getenv("PDFKB_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
         if os.getenv("OPENAI_API_KEY") and not os.getenv("PDFKB_OPENAI_API_KEY"):
             logger.warning("OPENAI_API_KEY is deprecated, use PDFKB_OPENAI_API_KEY instead")
+
+        # Only require OpenAI key if using OpenAI embeddings
+        if embedding_provider == "openai" and not openai_api_key:
+            raise ConfigurationError(
+                "PDFKB_OPENAI_API_KEY environment variable is required when using OpenAI embeddings"
+            )
+
+        # Use dummy key for local embeddings if not provided
         if not openai_api_key:
-            raise ConfigurationError("PDFKB_OPENAI_API_KEY environment variable is required")
+            openai_api_key = "sk-local-embeddings-dummy-key"
 
         # Get optional settings with defaults
         config_kwargs = {
             "openai_api_key": openai_api_key,
+            "embedding_provider": embedding_provider,
         }
 
         # Parse optional path settings
@@ -263,6 +307,57 @@ class ServerConfig:
             logger.warning("EMBEDDING_MODEL is deprecated, use PDFKB_EMBEDDING_MODEL instead")
         if embedding_model:
             config_kwargs["embedding_model"] = embedding_model
+
+        # Embedding provider already parsed and set above
+
+        # Parse local embedding configuration
+        local_embedding_model = os.getenv("PDFKB_LOCAL_EMBEDDING_MODEL")
+        if local_embedding_model:
+            config_kwargs["local_embedding_model"] = local_embedding_model
+
+        local_embedding_batch_size = os.getenv("PDFKB_LOCAL_EMBEDDING_BATCH_SIZE")
+        if local_embedding_batch_size:
+            try:
+                config_kwargs["local_embedding_batch_size"] = int(local_embedding_batch_size)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_LOCAL_EMBEDDING_BATCH_SIZE: {local_embedding_batch_size}")
+
+        embedding_device = os.getenv("PDFKB_EMBEDDING_DEVICE")
+        if embedding_device:
+            config_kwargs["embedding_device"] = embedding_device
+
+        embedding_cache_size = os.getenv("PDFKB_EMBEDDING_CACHE_SIZE")
+        if embedding_cache_size:
+            try:
+                config_kwargs["embedding_cache_size"] = int(embedding_cache_size)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_EMBEDDING_CACHE_SIZE: {embedding_cache_size}")
+
+        max_sequence_length = os.getenv("PDFKB_MAX_SEQUENCE_LENGTH")
+        if max_sequence_length:
+            try:
+                config_kwargs["max_sequence_length"] = int(max_sequence_length)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_MAX_SEQUENCE_LENGTH: {max_sequence_length}")
+
+        use_model_optimization = os.getenv("PDFKB_USE_MODEL_OPTIMIZATION")
+        if use_model_optimization:
+            config_kwargs["use_model_optimization"] = use_model_optimization.lower() in ["true", "1", "yes"]
+
+        model_cache_dir = os.getenv("PDFKB_MODEL_CACHE_DIR")
+        if model_cache_dir:
+            config_kwargs["model_cache_dir"] = model_cache_dir
+
+        embedding_dimension = os.getenv("PDFKB_EMBEDDING_DIMENSION")
+        if embedding_dimension:
+            try:
+                config_kwargs["embedding_dimension"] = int(embedding_dimension)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_EMBEDDING_DIMENSION: {embedding_dimension}")
+
+        fallback_to_openai = os.getenv("PDFKB_FALLBACK_TO_OPENAI")
+        if fallback_to_openai:
+            config_kwargs["fallback_to_openai"] = fallback_to_openai.lower() in ["true", "1", "yes"]
 
         log_level = os.getenv("PDFKB_LOG_LEVEL") or os.getenv("LOG_LEVEL")
         if os.getenv("LOG_LEVEL") and not os.getenv("PDFKB_LOG_LEVEL"):

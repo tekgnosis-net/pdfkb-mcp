@@ -1,8 +1,9 @@
 # PDF Knowledgebase MCP Server
 
-A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by OpenAI embeddings and ChromaDB vector storage.
+A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local or OpenAI embeddings and ChromaDB vector storage.
 
 **🆕 NEW Features:**
+- **Local Embeddings**: Run embeddings locally with HuggingFace models - no API costs, full privacy
 - **Hybrid Search**: Combines semantic similarity with keyword matching (BM25) for superior search quality
 - **Web Interface**: Modern web UI for document management and search alongside the traditional MCP protocol
 
@@ -11,6 +12,7 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 - [🚀 Quick Start](#-quick-start)
 - [🌐 Web Interface](#-web-interface)
 - [🏗️ Architecture Overview](#️-architecture-overview)
+- [🤖 Local Embeddings](#-local-embeddings)
 - [🔍 Hybrid Search](#-hybrid-search)
 - [🎯 Parser Selection Guide](#-parser-selection-guide)
 - [⚙️ Configuration](#️-configuration)
@@ -21,29 +23,18 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 
 ## 🚀 Quick Start
 
-### Step 1: Install the Server
+### Step 1: Configure Your MCP Client
 
-```bash
-uvx pdfkb-mcp
-```
-
-### Step 2: Configure Your MCP Client
-
-**Claude Desktop** (Most Common):
-
-*Configuration file locations:*
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+**Option A: Local Embeddings w/ Hybrid Search (No API Key Required)**
 ```json
 {
   "mcpServers": {
     "pdfkb": {
       "command": "uvx",
-      "args": ["pdfkb-mcp"],
+      "args": ["pdfkb-mcp[hybrid]"],
       "env": {
-        "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
-        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents/PDFs"
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents/PDFs",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
       },
       "transport": "stdio",
       "autoRestart": true
@@ -52,18 +43,21 @@ uvx pdfkb-mcp
 }
 ```
 
-**VS Code (Native MCP)** - Create `.vscode/mcp.json` in workspace:
+**Option B: OpenAI Embeddings w/ Hybrid Search**
 ```json
 {
   "mcpServers": {
     "pdfkb": {
       "command": "uvx",
-      "args": ["pdfkb-mcp"],
+      "args": ["pdfkb-mcp[hybrid]"],
       "env": {
+        "PDFKB_EMBEDDING_PROVIDER": "openai",
         "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
-        "PDFKB_KNOWLEDGEBASE_PATH": "${workspaceFolder}/pdfs"
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents/PDFs",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
       },
-      "transport": "stdio"
+      "transport": "stdio",
+      "autoRestart": true
     }
   }
 }
@@ -77,26 +71,25 @@ uvx pdfkb-mcp
 
 ## 🌐 Web Interface
 
-The PDF Knowledgebase now includes a modern web interface for easy document management and search. You can run the server in two different modes:
+The PDF Knowledgebase includes a modern web interface for easy document management and search. **The web interface is enabled by default.**
 
 ### Server Modes
 
-**1. MCP Only** (Traditional Mode):
+**1. Integrated Mode** (Default - Both MCP + Web):
 ```bash
 pdfkb-mcp
 ```
+- Runs both MCP server AND web interface concurrently
+- Web interface available at http://localhost:8080
+- Best of both worlds: API integration + web UI
+
+**2. MCP Only Mode** (Disable Web Interface):
+```bash
+PDFKB_ENABLE_WEB=false pdfkb-mcp
+```
 - Runs only the MCP server for integration with Claude Desktop, VS Code, etc.
 - Most resource-efficient option
-- Web interface disabled by default
-
-**2. Integrated** (Both MCP + Web):
-```bash
-PDFKB_ENABLE_WEB=true pdfkb-mcp
-```
-- Runs both MCP server AND web interface concurrently
-- Shared document processing and storage
-- Best of both worlds: API integration + web UI
-- Web interface available at http://localhost:8080
+- Uses same document storage as web interface
 
 ### Web Interface Features
 
@@ -130,7 +123,7 @@ PDFKB_ENABLE_WEB=true pdfkb-mcp
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `PDFKB_ENABLE_WEB` | `false` | Enable/disable web interface |
+| `PDFKB_ENABLE_WEB` | `true` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins |
@@ -140,8 +133,8 @@ PDFKB_ENABLE_WEB=true pdfkb-mcp
 The server supports command line arguments:
 
 ```bash
-# Customize web server port (when web interface is enabled)
-PDFKB_ENABLE_WEB=true pdfkb-mcp --port 9000
+# Customize web server port (web interface enabled by default)
+pdfkb-mcp --port 9000
 
 # Use custom configuration file
 pdfkb-mcp --config myconfig.env
@@ -163,26 +156,95 @@ When running with web interface enabled, comprehensive API documentation is avai
 
 ### MCP Integration
 
-```raw
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   MCP Client    │    │   MCP Client     │    │   MCP Client    │
-│ (Claude Desktop)│    │(VS Code/Continue)|    │   (Other)       │
-└─────────┬───────┘    └─────────┬────────┘    └─────────┬───────┘
-          │                      │                       │
-          └──────────────────────┼───────────────────────┘
-                                 │
-                    ┌────────────┴────────────┐
-                    │    Model Context        │
-                    │    Protocol (MCP)       │
-                    │    Standard Layer       │
-                    └────────────┬────────────┘
-                                 │
-          ┌──────────────────────┼───────────────────────┐
-          │                      │                       │
-┌─────────┴───────┐    ┌─────────┴────────┐    ┌─────────┴───────┐
-│ PDF KB Server   │    │  Other MCP       │    │  Other MCP      │
-│ (This Server)   │    │  Server          │    │  Server         │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+```mermaid
+graph TB
+    subgraph "MCP Clients"
+        C1[Claude Desktop]
+        C2[VS Code/Continue]
+        C3[Other MCP Clients]
+    end
+
+    subgraph "MCP Protocol Layer"
+        MCP[Model Context Protocol<br/>Standard Layer]
+    end
+
+    subgraph "MCP Servers"
+        PDFKB[PDF KB Server<br/>This Server]
+        S1[Other MCP<br/>Server]
+        S2[Other MCP<br/>Server]
+    end
+
+    C1 --> MCP
+    C2 --> MCP
+    C3 --> MCP
+
+    MCP --> PDFKB
+    MCP --> S1
+    MCP --> S2
+
+    classDef client fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef protocol fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef server fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef highlight fill:#c8e6c9,stroke:#1b5e20,stroke-width:3px
+
+    class C1,C2,C3 client
+    class MCP protocol
+    class S1,S2 server
+    class PDFKB highlight
+```
+
+### Internal Architecture
+
+```mermaid
+graph LR
+    subgraph "Input Layer"
+        PDF[PDF Files]
+        WEB[Web Interface<br/>Port 8080]
+        MCP_IN[MCP Protocol]
+    end
+
+    subgraph "Processing Pipeline"
+        PARSER[PDF Parser<br/>PyMuPDF/Marker/MinerU]
+        CHUNKER[Text Chunker<br/>LangChain/Unstructured]
+        EMBED[Embedding Service<br/>Local/OpenAI]
+    end
+
+    subgraph "Storage Layer"
+        CACHE[Intelligent Cache<br/>Multi-stage]
+        VECTOR[Vector Store<br/>ChromaDB]
+        TEXT[Text Index<br/>Whoosh BM25]
+    end
+
+    subgraph "Search Engine"
+        HYBRID[Hybrid Search<br/>RRF Fusion]
+    end
+
+    PDF --> PARSER
+    WEB --> PARSER
+    MCP_IN --> PARSER
+
+    PARSER --> CHUNKER
+    CHUNKER --> EMBED
+
+    EMBED --> CACHE
+    CACHE --> VECTOR
+    CACHE --> TEXT
+
+    VECTOR --> HYBRID
+    TEXT --> HYBRID
+
+    HYBRID --> WEB
+    HYBRID --> MCP_IN
+
+    classDef input fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef process fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef storage fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef search fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+
+    class PDF,WEB,MCP_IN input
+    class PARSER,CHUNKER,EMBED process
+    class CACHE,VECTOR,TEXT storage
+    class HYBRID search
 ```
 
 ### Available Tools & Resources
@@ -197,6 +259,118 @@ When running with web interface enabled, comprehensive API documentation is avai
 - `pdf://{document_id}` - Full document content as JSON
 - `pdf://{document_id}/page/{page_number}` - Specific page content
 - `pdf://list` - List of all documents with metadata
+
+## 🤖 Local Embeddings
+
+The server now supports **local embeddings** as the default option, eliminating API costs and keeping your data completely private. Local embeddings run on your machine using HuggingFace models optimized for performance.
+
+### Features
+
+- **Zero API Costs**: No OpenAI API charges for embeddings
+- **Complete Privacy**: Your documents never leave your machine
+- **Hardware Acceleration**: Automatic detection and use of Metal (macOS), CUDA (NVIDIA), or CPU
+- **Smart Caching**: LRU cache for frequently embedded texts
+- **Multiple Model Sizes**: Choose based on your hardware capabilities
+
+### Quick Start
+
+Local embeddings are **enabled by default**. No configuration needed for basic usage:
+
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/pdfs"
+      }
+    }
+  }
+}
+```
+
+### Supported Models
+
+| Model | Size | Dimensions | Max Context | Best For |
+|-------|------|------------|-------------|----------|
+| **Qwen/Qwen3-Embedding-0.6B** (default) | 1.2GB | 1024 | 32K tokens | Best overall - long docs, fast |
+| **Qwen/Qwen3-Embedding-4B** | 8.0GB | 2560 | 32K tokens | Maximum quality, long context |
+| **intfloat/multilingual-e5-large-instruct** | 0.8GB | 1024 | 512 tokens | Multilingual, instruction-following |
+| **BAAI/bge-m3** | 2.0GB | 1024 | 8K tokens | Multilingual, balanced |
+| **jinaai/jina-embeddings-v3** | 1.3GB | 1024 | 8K tokens | Task-specific retrieval |
+
+Configure your preferred model:
+```bash
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"  # Default
+```
+
+### Hardware Optimization
+
+The server automatically detects and uses the best available hardware:
+
+- **Apple Silicon (M1/M2/M3)**: Uses Metal Performance Shaders (MPS)
+- **NVIDIA GPUs**: Uses CUDA acceleration
+- **CPU Fallback**: Optimized for multi-core processing
+
+Force a specific device if needed:
+```bash
+PDFKB_EMBEDDING_DEVICE="mps"   # Force Metal/MPS
+PDFKB_EMBEDDING_DEVICE="cuda"  # Force CUDA
+PDFKB_EMBEDDING_DEVICE="cpu"   # Force CPU
+```
+
+### Configuration Options
+
+```bash
+# Embedding provider (local or openai)
+PDFKB_EMBEDDING_PROVIDER="local"  # Default
+
+# Model selection (choose from supported models)
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"  # Default
+# Other options:
+# - "Qwen/Qwen3-Embedding-4B" (8GB, 2560 dims, best quality)
+# - "intfloat/multilingual-e5-large-instruct" (0.8GB, multilingual)
+# - "BAAI/bge-m3" (2GB, multilingual, 8K context)
+# - "jinaai/jina-embeddings-v3" (1.3GB, task-specific)
+
+# Performance tuning
+PDFKB_LOCAL_EMBEDDING_BATCH_SIZE=32  # Adjust based on memory
+PDFKB_EMBEDDING_CACHE_SIZE=10000     # Number of cached embeddings
+PDFKB_MAX_SEQUENCE_LENGTH=512        # Maximum text length
+
+# Fallback options
+PDFKB_FALLBACK_TO_OPENAI=false  # Use OpenAI if local fails
+```
+
+### Switching to OpenAI
+
+If you prefer OpenAI embeddings:
+
+```json
+{
+  "env": {
+    "PDFKB_EMBEDDING_PROVIDER": "openai",
+    "PDFKB_OPENAI_API_KEY": "sk-proj-...",
+    "PDFKB_EMBEDDING_MODEL": "text-embedding-3-large"
+  }
+}
+```
+
+### Performance Tips
+
+1. **Batch Size**: Larger batches are faster but use more memory
+   - Apple Silicon: 32-64 recommended
+   - NVIDIA GPUs: 64-128 recommended
+   - CPU: 16-32 recommended
+
+2. **Model Selection**: Choose based on your needs
+   - **Default (Qwen3-0.6B)**: Best for most users - 32K context, fast, 1.2GB
+   - **Long documents**: Use Qwen3-4B for 32K context with higher quality
+   - **Multilingual**: Use bge-m3 or multilingual-e5-large-instruct
+   - **Specific tasks**: Use jina-embeddings-v3 with task parameters
+
+3. **Memory Management**: The server automatically handles OOM errors by reducing batch size
 
 ## 🔍 Hybrid Search
 
@@ -241,23 +415,33 @@ Or if using uvx, it's included by default when hybrid search is enabled.
 ```
 Document Type & Priority?
 ├── 🏃 Speed Priority → PyMuPDF4LLM (fastest processing, low memory)
-├── 📚 Academic Papers → MinerU (fast with GPU, excellent formulas)
-├── 📊 Business Reports → Docling (medium speed, best tables)
-├── ⚖️ Balanced Quality → Marker (medium speed, good structure)
-└── 🎯 Maximum Accuracy → LLM (slow, vision-based API calls)
+├── 📚 Academic Papers → MinerU (GPU-accelerated, excellent formulas/tables)
+├── 📊 Business Reports → Docling (accurate tables, structured output)
+├── ⚖️ Balanced Quality → Marker (good multilingual, selective OCR)
+└── 🎯 Maximum Accuracy → LLM (slow, API costs, complex layouts)
 ```
 
 ### Performance Comparison
 
 | Parser | Processing Speed | Memory | Text Quality | Table Quality | Best For |
 |--------|------------------|--------|--------------|---------------|----------|
-| **PyMuPDF4LLM** | **Fastest** | Low | Good | Basic | Speed priority |
-| **MinerU** | Fast (with GPU) | High | Excellent | Excellent | Scientific papers |
-| **Docling** | Medium | Medium | Excellent | **Excellent** | Business documents |
-| **Marker** | Medium | Medium | Excellent | Good | **Balanced** |
-| **LLM** | Slow | Low | Excellent | Excellent | Maximum accuracy |
+| **PyMuPDF4LLM** | **Fastest** | Low | Good | Basic-Moderate | RAG pipelines, bulk ingestion |
+| **MinerU** | Fast with GPU¹ | ~4GB VRAM² | Excellent | Excellent | Scientific/technical PDFs |
+| **Docling** | 0.9-2.5 pages/s³ | 2.5-6GB⁴ | Excellent | **Excellent** | Structured documents, tables |
+| **Marker** | ~25 p/s batch⁵ | ~4GB VRAM⁶ | Excellent | Good-Excellent⁷ | Scientific papers, multilingual |
+| **LLM** | Slow⁸ | Variable⁹ | Excellent¹⁰ | Excellent | Complex layouts, high-value docs |
 
-*Benchmarks from research studies and technical reports*
+**Notes:**
+¹ >10,000 tokens/s on RTX 4090 with sglang
+² Reported for <1B parameter model
+³ CPU benchmarks: 0.92-1.34 p/s (native), 1.57-2.45 p/s (pypdfium)
+⁴ 2.42-2.56GB (pypdfium), 6.16-6.20GB (native backend)
+⁵ Projected on H100 GPU in batch mode
+⁶ Benchmark configuration on NVIDIA A6000
+⁷ Enhanced with optional LLM mode for table merging
+⁸ Order of magnitude slower than traditional parsers
+⁹ Depends on token usage and model size
+¹⁰ 98.7-100% accuracy when given clean text
 
 ## ⚙️ Configuration
 
@@ -425,7 +609,7 @@ Document Type & Priority?
 | `PDFKB_PDF_PARSER` | `pymupdf4llm` | Parser: `pymupdf4llm` (default), `marker`, `mineru`, `docling`, `llm` |
 | `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `unstructured` |
 | `PDFKB_CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
-| `PDFKB_ENABLE_WEB` | `false` | Enable/disable web interface |
+| `PDFKB_ENABLE_WEB` | `true` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
@@ -722,8 +906,8 @@ The server uses multi-stage caching:
 ```bash
 uvx pdfkb-mcp
 **Web Interface Included**: All installation methods include the web interface. Use these commands:
-- `pdfkb-mcp` - MCP server only (web disabled by default)
-- `PDFKB_ENABLE_WEB=true pdfkb-mcp` - Integrated MCP + Web server
+- `pdfkb-mcp` - Integrated MCP + Web server (default)
+- `PDFKB_ENABLE_WEB=false pdfkb-mcp` - MCP server only (web disabled)
 ```
 
 **With Specific Parser Dependencies**:
@@ -768,7 +952,7 @@ pip install -e ".[dev]"
 | `PDFKB_VECTOR_SEARCH_K` | `5` | Default search results |
 | `PDFKB_FILE_SCAN_INTERVAL` | `60` | File monitoring interval |
 | `PDFKB_LOG_LEVEL` | `INFO` | Logging level |
-| `PDFKB_ENABLE_WEB` | `false` | Enable/disable web interface |
+| `PDFKB_ENABLE_WEB` | `true` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
@@ -820,9 +1004,10 @@ pip install -e ".[dev]"
 3. LLM: Requires `PDFKB_OPENROUTER_API_KEY` environment variable
 
 **Performance Optimization**:
-1. **Speed**: Use `pymupdf4llm` parser
-2. **Memory**: Reduce `PDFKB_EMBEDDING_BATCH_SIZE` and `PDFKB_CHUNK_SIZE`
-3. **Quality**: Use `mineru` (GPU) or `docling` (CPU)
-4. **Tables**: Use `docling` with `PDFKB_DOCLING_TABLE_MODE=ACCURATE`
+1. **Speed**: Use `pymupdf4llm` parser (fastest, low memory footprint)
+2. **Memory**: Reduce `PDFKB_EMBEDDING_BATCH_SIZE` and `PDFKB_CHUNK_SIZE`; use pypdfium backend for Docling
+3. **Quality**: Use `mineru` with GPU (>10K tokens/s on RTX 4090) or `marker` for balanced quality
+4. **Tables**: Use `docling` with `PDFKB_DOCLING_TABLE_MODE=ACCURATE` or `marker` with LLM mode
+5. **Batch Processing**: Use `marker` on H100 (~25 pages/s) or `mineru` with sglang acceleration
 
 For additional support, see implementation details in [`src/pdfkb/main.py`](src/pdfkb/main.py) and [`src/pdfkb/config.py`](src/pdfkb/config.py).

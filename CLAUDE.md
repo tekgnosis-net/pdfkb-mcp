@@ -57,7 +57,7 @@ hatch run cov-html
 - Main config class: `ServerConfig` in `src/pdfkb/config.py`
 - Environment variables prefixed with `PDFKB_`
 - Parser and chunker selection via `PDFKB_PDF_PARSER` and `PDFKB_PDF_CHUNKER`
-- Web interface enabled via `PDFKB_ENABLE_WEB=true`
+- Web interface enabled by default (disable with `PDFKB_ENABLE_WEB=false`)
 
 ## Key Files and Their Roles
 
@@ -75,9 +75,9 @@ Version is managed by `bump2version` - never manually change version numbers. On
 ## Environment Setup
 
 Essential environment variables:
-- `PDFKB_OPENAI_API_KEY`: Required for embeddings
+- `PDFKB_OPENAI_API_KEY`: Required only for OpenAI embeddings (local embeddings are default)
 - `PDFKB_KNOWLEDGEBASE_PATH`: PDF directory path
-- `PDFKB_ENABLE_WEB`: Enable web interface (`true`/`false`)
+- `PDFKB_ENABLE_WEB`: Web interface control (default: `true`)
 
 Optional parsers require additional installations:
 - `pip install "pdfkb-mcp[marker]"` for Marker parser

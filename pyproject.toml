@@ -60,11 +60,29 @@ dependencies = [
     "pymupdf4llm>=0.0.27",
     "PyMuPDF>=1.26.3",
     "langchain-text-splitters>=0.3.9",
+
+    # Local embeddings support (default)
+    "torch>=2.0.0",
+    "transformers>=4.35.0",
+    "accelerate>=0.24.0",
+    "safetensors>=0.4.0",
+    "huggingface-hub>=0.19.0",
+
+    # Hybrid search support (included by default)
+    "whoosh>=2.7.4",
 ]
 
 [project.optional-dependencies]
 hybrid = [
     "whoosh>=2.7.4",
+]
+
+local-embeddings = [
+    "torch>=2.0.0",  # For MPS support and torch.compile
+    "transformers>=4.35.0",  # For model support
+    "accelerate>=0.24.0",  # For device management
+    "safetensors>=0.4.0",  # For safe model loading
+    "huggingface-hub>=0.19.0",  # For model downloading
 ]
 
 dev = [

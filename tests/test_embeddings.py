@@ -1,6 +1,6 @@
 """Tests for the embeddings module."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -16,6 +16,7 @@ class TestEmbeddingService:
         """Create a test configuration."""
         return ServerConfig(
             openai_api_key="sk-test-key",
+            embedding_provider="openai",  # Explicitly use OpenAI for these tests
             embedding_model="text-embedding-3-small",
             embedding_batch_size=10,
         )
@@ -28,22 +29,13 @@ class TestEmbeddingService:
     @pytest.mark.asyncio
     async def test_initialize_embedding_service(self, embedding_service):
         """Test initializing the embedding service."""
-        # Avoid real OpenAI client initialization by patching initialize internals
-        # Patch importlib to fake presence of openai and AsyncOpenAI client
-        import importlib
-        import types
-
-        fake_openai = types.SimpleNamespace(AsyncOpenAI=Mock())
-        with patch.object(
-            importlib,
-            "import_module",
-            side_effect=lambda name, package=None: (
-                fake_openai if name == "openai" else importlib.__dict__["import_module"](name, package)
-            ),
-        ):
+        # Mock the underlying OpenAI service initialization
+        with patch.object(embedding_service._service, "initialize", new=AsyncMock()) as mock_init:
             await embedding_service.initialize()
-            assert embedding_service.model == "text-embedding-3-small"
-            assert embedding_service.batch_size == 10
+            mock_init.assert_called_once()
+            # Check that the service was created with correct config
+            assert embedding_service._service.model == "text-embedding-3-small"
+            assert embedding_service._service.batch_size == 10
 
     @pytest.mark.asyncio
     async def test_generate_embeddings_empty_list(self, embedding_service):
@@ -55,10 +47,10 @@ class TestEmbeddingService:
     async def test_generate_embeddings_single_text(self, embedding_service):
         """Test generating embeddings for single text."""
         texts = ["This is a test text."]
-        # Patch batch generation to return fixed vectors to avoid network and dependency
+        # Patch the underlying service's method
         with patch.object(
-            embedding_service,
-            "_generate_batch_embeddings",
+            embedding_service._service,
+            "generate_embeddings",
             new=AsyncMock(return_value=[[0.0] * 1536]),
         ):
             embeddings = await embedding_service.generate_embeddings(texts)
@@ -70,9 +62,9 @@ class TestEmbeddingService:
         """Test generating embedding for single text."""
         text = "Single test text"
         with patch.object(
-            embedding_service,
-            "_generate_batch_embeddings",
-            new=AsyncMock(return_value=[[0.0] * 1536]),
+            embedding_service._service,
+            "generate_embedding",
+            new=AsyncMock(return_value=[0.0] * 1536),
         ):
             embedding = await embedding_service.generate_embedding(text)
             assert len(embedding) == 1536
@@ -83,9 +75,9 @@ class TestEmbeddingService:
         # Create more texts than batch size
         texts = [f"Test text {i}" for i in range(25)]
         with patch.object(
-            embedding_service,
-            "_generate_batch_embeddings",
-            new=AsyncMock(side_effect=lambda batch: [[0.0] * 1536 for _ in batch]),
+            embedding_service._service,
+            "generate_embeddings",
+            new=AsyncMock(return_value=[[0.0] * 1536 for _ in texts]),
         ):
             embeddings = await embedding_service.generate_embeddings(texts)
             assert len(embeddings) == 25
@@ -94,11 +86,11 @@ class TestEmbeddingService:
     @pytest.mark.asyncio
     async def test_test_connection_success(self, embedding_service):
         """Test successful connection test."""
-        # Ensure generate_embedding returns a non-empty vector by mocking batch generation
+        # Mock the underlying service's test_connection
         with patch.object(
-            embedding_service,
-            "_generate_batch_embeddings",
-            new=AsyncMock(return_value=[[0.0] * 1536]),
+            embedding_service._service,
+            "test_connection",
+            new=AsyncMock(return_value=True),
         ):
             result = await embedding_service.test_connection()
             assert result is True  # Implementation returns True on success
@@ -112,6 +104,7 @@ class TestEmbeddingService:
         """Test getting embedding dimension for different model."""
         config = ServerConfig(
             openai_api_key="sk-test-key",
+            embedding_provider="openai",
             embedding_model="text-embedding-3-large",
         )
         service = EmbeddingService(config)
@@ -140,13 +133,15 @@ class TestEmbeddingService:
     def test_extract_retry_after_with_match(self, embedding_service):
         """Test extracting retry-after from error message."""
         error_msg = "Rate limit exceeded. Please retry after 60 seconds."
-        retry_after = embedding_service._extract_retry_after(error_msg)
+        # Access the underlying OpenAI service's method
+        retry_after = embedding_service._service._extract_retry_after(error_msg)
         assert retry_after == 60
 
     def test_extract_retry_after_no_match(self, embedding_service):
         """Test extracting retry-after when no match found."""
         error_msg = "Some other error message"
-        retry_after = embedding_service._extract_retry_after(error_msg)
+        # Access the underlying OpenAI service's method
+        retry_after = embedding_service._service._extract_retry_after(error_msg)
         assert retry_after is None
 
     # TODO: Add more comprehensive tests when real implementation is added

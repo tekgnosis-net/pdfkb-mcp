@@ -1000,9 +1000,8 @@ Environment Variables:
   LOG_LEVEL              Logging level (default: INFO)
 
 Examples:
-  pdfkb-mcp                          # Run with default settings (MCP + Web if PDFKB_ENABLE_WEB=true)
-  PDFKB_ENABLE_WEB=false pdfkb-mcp   # Run MCP server only
-  PDFKB_ENABLE_WEB=true pdfkb-mcp    # Run MCP server with web interface
+  pdfkb-mcp                          # Run with default settings (MCP + Web enabled)
+  PDFKB_ENABLE_WEB=false pdfkb-mcp   # Run MCP server only (disable web interface)
   pdfkb-mcp --config myconfig.env    # Use custom config file
         """,
     )
