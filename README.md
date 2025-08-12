@@ -99,12 +99,18 @@ pdfkb-mcp --enable-web
 
 ### Web Interface Features
 
+![PDF Knowledgebase Web Interface - Documents List](docs/images/web_documents_list.png)
+*Modern web interface showing document collection with search, filtering, and management capabilities*
+
 - **📄 Document Upload**: Drag & drop PDF files or upload via file picker
 - **🔍 Semantic Search**: Powerful vector-based search with real-time results
 - **📊 Document Management**: List, preview, and manage your PDF collection
 - **📈 Real-time Status**: Live processing updates via WebSocket connections
 - **🎯 Chunk Explorer**: View and navigate document chunks for detailed analysis
 - **⚙️ System Metrics**: Monitor server performance and resource usage
+
+![PDF Knowledgebase Web Interface - Document Summary](docs/images/web_document_summary.png)
+*Detailed document view showing metadata, chunk analysis, and content preview*
 
 ### Quick Web Setup
 
