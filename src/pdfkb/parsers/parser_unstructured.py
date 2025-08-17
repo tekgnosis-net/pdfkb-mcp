@@ -4,12 +4,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .parser import ParseResult, PDFParser
+from .parser import DocumentParser, PageContent, ParseResult
 
 logger = logging.getLogger(__name__)
 
 
-class UnstructuredPDFParser(PDFParser):
+class UnstructuredPDFParser(DocumentParser):
     """PDF parser using the Unstructured library."""
 
     def __init__(self, strategy: str = "fast", cache_dir: Path = None):
@@ -41,7 +41,10 @@ class UnstructuredPDFParser(PDFParser):
                     markdown_content = self._load_from_cache(cache_path)
                     metadata = self._load_metadata_from_cache(cache_path)
                     if markdown_content is not None and metadata:
-                        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                        # Create page-aware result
+                        # TODO: Implement proper page extraction for this parser
+                        pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+                        return ParseResult(pages=pages, metadata=metadata)
 
             from unstructured.partition.pdf import partition_pdf
 
@@ -78,7 +81,10 @@ class UnstructuredPDFParser(PDFParser):
                 self._save_metadata_to_cache(cache_path, metadata)
 
             logger.debug(f"Extracted {len(elements)} elements from PDF using Unstructured")
-            return ParseResult(markdown_content=markdown_content, metadata=metadata)
+            # Create page-aware result
+            # TODO: Implement proper page extraction for this parser
+            pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+            return ParseResult(pages=pages, metadata=metadata)
 
         except ImportError:
             raise ImportError("Unstructured library not available. Install with: pip install unstructured[pdf]")

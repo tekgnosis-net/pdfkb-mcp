@@ -1,4 +1,4 @@
-"""Advanced file system monitoring for PDF directory changes with metadata persistence."""
+"""Advanced file system monitoring for document directory changes with metadata persistence."""
 
 import asyncio
 import hashlib
@@ -139,7 +139,7 @@ class FileMonitor:
     def __init__(
         self,
         config: ServerConfig,
-        pdf_processor=None,
+        document_processor=None,
         vector_store=None,
         document_cache_callback=None,
         background_queue: Optional[BackgroundProcessingQueue] = None,
@@ -149,14 +149,14 @@ class FileMonitor:
 
         Args:
             config: Server configuration.
-            pdf_processor: PDF processing service.
+            document_processor: Document processing service.
             vector_store: Vector storage service.
             document_cache_callback: Callback function to update main server's document cache.
             background_queue: Optional background processing queue for non-blocking file processing.
             web_document_service: Optional WebDocumentService for creating in-progress document placeholders.
         """
         self.config = config
-        self.pdf_processor = pdf_processor
+        self.document_processor = document_processor
         self.vector_store = vector_store
         self.document_cache_callback = document_cache_callback
         self.background_queue = background_queue
@@ -495,7 +495,7 @@ class FileMonitor:
                 job_type=job_type,
                 metadata=job_metadata,
                 priority=priority,
-                processor=self._process_pdf_job,
+                processor=self._process_document_job,
             )
 
             # Create in-progress document placeholder if web service is available
@@ -538,7 +538,7 @@ class FileMonitor:
             # Fallback to synchronous processing on queue failure
             await self._process_file_synchronously(file_path)
 
-    async def _process_pdf_job(self, job: Job) -> None:
+    async def _process_document_job(self, job: Job) -> None:
         """Background job processor for PDF files.
 
         Args:
@@ -553,7 +553,7 @@ class FileMonitor:
             logger.info(f"Starting background processing for: {file_path} (job_id: {job_id})")
 
             # Process the file
-            if not self.pdf_processor:
+            if not self.document_processor:
                 # Just track the file without processing
                 checksum = job.metadata["checksum"]
                 metadata = FileMetadata(
@@ -571,7 +571,7 @@ class FileMonitor:
                     self._remove_in_progress_document(job_id)
                 return
 
-            result = await self.pdf_processor.process_pdf(file_path)
+            result = await self.document_processor.process_document(file_path)
 
             if result.success and result.document:
                 # Add to vector store
@@ -634,8 +634,8 @@ class FileMonitor:
                 stat = file_path.stat()
 
                 # Process the file
-                if self.pdf_processor:
-                    result = await self.pdf_processor.process_pdf(file_path)
+                if self.document_processor:
+                    result = await self.document_processor.process_document(file_path)
 
                     if result.success and result.document:
                         # Add to vector store
@@ -920,7 +920,7 @@ class FileMonitor:
             from watchdog.events import FileSystemEvent, FileSystemEventHandler
             from watchdog.observers import Observer
 
-            class PDFEventHandler(FileSystemEventHandler):
+            class DocumentEventHandler(FileSystemEventHandler):
                 def __init__(self, monitor: "FileMonitor"):
                     self.monitor = monitor
                     self.loop = asyncio.get_event_loop()
@@ -987,7 +987,7 @@ class FileMonitor:
 
                     return True
 
-            self.event_handler = PDFEventHandler(self)
+            self.event_handler = DocumentEventHandler(self)
             self.observer = Observer()
             self.observer.schedule(self.event_handler, str(self.config.knowledgebase_path), recursive=True)
 

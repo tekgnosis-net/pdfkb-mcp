@@ -35,7 +35,7 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
       "command": "uvx",
       "args": ["pdfkb-mcp[hybrid]"],
       "env": {
-        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents/PDFs",
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
         "PDFKB_ENABLE_HYBRID_SEARCH": "true"
       },
       "transport": "stdio",
@@ -55,7 +55,7 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
       "env": {
         "PDFKB_EMBEDDING_PROVIDER": "openai",
         "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
-        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents/PDFs",
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
         "PDFKB_ENABLE_HYBRID_SEARCH": "true"
       },
       "transport": "stdio",
@@ -383,6 +383,46 @@ If you prefer OpenAI embeddings:
    - **Specific tasks**: Use jina-embeddings-v3 with task parameters
 
 3. **Memory Management**: The server automatically handles OOM errors by reducing batch size
+
+## 📝 Markdown Document Support
+
+The server now supports **Markdown documents** (.md, .markdown) alongside PDFs, perfect for:
+- Pre-processed documents where you've already extracted clean markdown
+- Technical documentation and notes
+- Avoiding complex PDF parsing for better quality content
+- Faster processing with no conversion overhead
+
+### Features
+
+- **Native Processing**: Markdown files are read directly without conversion
+- **Page Boundary Detection**: Automatically splits documents on page markers like `--[PAGE: 142]--`
+- **Frontmatter Support**: Automatically extracts YAML/TOML frontmatter metadata
+- **Title Extraction**: Intelligently extracts titles from H1 headers or frontmatter
+- **Same Pipeline**: Uses the same chunking, embedding, and search infrastructure as PDFs
+- **Mixed Collections**: Search across both PDFs and Markdown documents seamlessly
+
+### Usage
+
+Simply add Markdown files the same way you add PDFs:
+
+```python
+# In your MCP client
+await add_document("/path/to/document.md")
+await add_document("/path/to/paper.pdf")
+
+# Search across both types
+results = await search_documents("your query")
+```
+
+### Configuration
+
+```bash
+# Markdown-specific settings
+PDFKB_MARKDOWN_PAGE_BOUNDARY_PATTERN="--\\[PAGE:\\s*(\\d+)\\]--"  # Regex pattern for page boundaries
+PDFKB_MARKDOWN_SPLIT_ON_PAGE_BOUNDARIES=true  # Enable page boundary detection
+PDFKB_MARKDOWN_PARSE_FRONTMATTER=true  # Parse YAML/TOML frontmatter (default: true)
+PDFKB_MARKDOWN_EXTRACT_TITLE=true      # Extract title from first H1 (default: true)
+```
 
 ## 🔍 Hybrid Search
 
@@ -752,7 +792,7 @@ Document Type & Priority?
 | `PDFKB_KNOWLEDGEBASE_PATH` | `./pdfs` | Directory containing PDF files |
 | `PDFKB_CACHE_DIR` | `./.cache` | Cache directory for processing |
 | `PDFKB_PDF_PARSER` | `pymupdf4llm` | Parser: `pymupdf4llm` (default), `marker`, `mineru`, `docling`, `llm` |
-| `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `unstructured`, `semantic` |
+| `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain` (default), `page`, `unstructured`, `semantic` |
 | `PDFKB_CHUNK_SIZE` | `1000` | Target chunk size for LangChain chunker |
 | `PDFKB_WEB_ENABLE` | `false` | Enable/disable web interface |
 | `PDFKB_WEB_PORT` | `8080` | Web server port |
@@ -782,7 +822,7 @@ Document Type & Priority?
       "args": ["pdfkb-mcp"],
       "env": {
         "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
-        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents/PDFs",
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
         "PDFKB_CACHE_DIR": "/Users/yourname/Documents/PDFs/.cache"
       },
       "transport": "stdio",
@@ -1182,7 +1222,14 @@ pip install -e ".[dev]"
 - Best for customizable chunking
 - Default and installed with base package
 
-**Semantic** (`PDFKB_PDF_CHUNKER=semantic`) **🆕 NEW**:
+**Page** (`PDFKB_PDF_CHUNKER=page`) **🆕 NEW**:
+- Page-based chunking that preserves document page boundaries
+- Works with page-aware parsers that output individual pages
+- Supports merging small pages and splitting large ones
+- Configurable via `PDFKB_PAGE_CHUNKER_MIN_CHUNK_SIZE` and `PDFKB_PAGE_CHUNKER_MAX_CHUNK_SIZE`
+- Best for preserving original document structure and page-level metadata
+
+**Semantic** (`PDFKB_PDF_CHUNKER=semantic`):
 - Advanced semantic chunking using LangChain's [`SemanticChunker`](src/pdfkb/chunker/chunker_semantic.py)
 - Groups semantically related content together using embedding similarity
 - Four breakpoint detection methods: percentile, standard_deviation, interquartile, gradient

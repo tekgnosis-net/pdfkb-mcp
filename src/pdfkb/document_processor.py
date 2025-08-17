@@ -1,4 +1,4 @@
-"""PDF processing and chunking functionality."""
+"""Document processing and chunking functionality for PDFs and Markdown files."""
 
 import asyncio
 import hashlib
@@ -10,13 +10,15 @@ from typing import Any, Dict, List, Optional
 
 from .chunker import Chunker
 from .chunker.chunker_langchain import LangChainChunker
+from .chunker.chunker_page import PageChunker
 from .chunker.chunker_unstructured import ChunkerUnstructured
 from .config import ServerConfig
-from .exceptions import PDFProcessingError
+from .exceptions import DocumentProcessingError, PDFProcessingError
 from .models import Chunk, Document, ProcessingResult
-from .parsers.parser import ParseResult, PDFParser
+from .parsers.parser import DocumentParser, ParseResult
 from .parsers.parser_docling import DoclingParser
 from .parsers.parser_llm import LLMParser
+from .parsers.parser_markdown import MarkdownParser
 from .parsers.parser_marker import MarkerPDFParser
 from .parsers.parser_mineru import MinerUPDFParser
 from .parsers.parser_pymupdf4llm import PyMuPDF4LLMParser
@@ -25,8 +27,8 @@ from .parsers.parser_unstructured import UnstructuredPDFParser
 logger = logging.getLogger(__name__)
 
 
-class PDFProcessor:
-    """Manages PDF processing and metadata extraction."""
+class DocumentProcessor:
+    """Manages document processing and metadata extraction for PDFs and Markdown files."""
 
     def __init__(
         self,
@@ -35,7 +37,7 @@ class PDFProcessor:
         cache_manager: Optional[Any] = None,
         embedding_semaphore: Optional[asyncio.Semaphore] = None,
     ):
-        """Initialize the PDF processor.
+        """Initialize the document processor.
 
         Args:
             config: Server configuration.
@@ -50,11 +52,11 @@ class PDFProcessor:
         self.parser = self._create_parser()
         self.chunker = self._create_chunker()
 
-    def _create_parser(self) -> PDFParser:
+    def _create_parser(self) -> DocumentParser:
         """Create the appropriate PDF parser based on configuration.
 
         Returns:
-            PDFParser instance.
+            DocumentParser instance for PDF parsing.
         """
         parser_type = getattr(self.config, "pdf_parser", "unstructured")
         cache_dir = self.config.cache_dir if hasattr(self.config, "cache_dir") else None
@@ -248,7 +250,13 @@ class PDFProcessor:
         # Get chunker type, with "langchain" as the actual default (matching config.py)
         chunker_type = getattr(self.config, "pdf_chunker", "langchain")
 
-        if chunker_type == "semantic":
+        if chunker_type == "page":
+            return PageChunker(
+                min_chunk_size=self.config.page_chunker_min_chunk_size,
+                max_chunk_size=self.config.page_chunker_max_chunk_size,
+                merge_small=self.config.page_chunker_merge_small,
+            )
+        elif chunker_type == "semantic":
             try:
                 from .chunker.chunker_semantic import SemanticChunker
 
@@ -351,11 +359,22 @@ class PDFProcessor:
                         logger.debug(f"Skipping non-serializable metadata field in parsing cache: {key}")
                         continue
 
+            # Prepare pages data for caching
+            pages_data = []
+            for page in parse_result.pages:
+                pages_data.append(
+                    {
+                        "page_number": page.page_number,
+                        "markdown_content": page.markdown_content,
+                        "metadata": page.metadata,
+                    }
+                )
+
             cache_data = {
                 "checksum": checksum,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "parsing_fingerprint": (self.cache_manager.get_parsing_fingerprint() if self.cache_manager else None),
-                "markdown_content": parse_result.markdown_content,
+                "pages": pages_data,
                 "metadata": cleaned_metadata,
             }
 
@@ -404,9 +423,26 @@ class PDFProcessor:
                     logger.debug("Parsing cache invalid: configuration changed")
                     return None
 
-            # Cache is valid, return ParseResult
+            # Cache is valid, reconstruct pages and return ParseResult
+            from .parsers.parser import PageContent
+
+            pages = []
+            if "pages" in cache_data:
+                # New format with pages
+                for page_data in cache_data["pages"]:
+                    pages.append(
+                        PageContent(
+                            page_number=page_data["page_number"],
+                            markdown_content=page_data["markdown_content"],
+                            metadata=page_data.get("metadata", {}),
+                        )
+                    )
+            elif "markdown_content" in cache_data:
+                # Old format - create single page (for backward compatibility)
+                pages.append(PageContent(page_number=1, markdown_content=cache_data["markdown_content"], metadata={}))
+
             parse_result = ParseResult(
-                markdown_content=cache_data["markdown_content"],
+                pages=pages,
                 metadata=cache_data["metadata"],
             )
 
@@ -517,6 +553,27 @@ class PDFProcessor:
             logger.warning(f"Failed to load chunking result from cache: {e}")
             return None
 
+    async def process_document(self, file_path: Path, metadata: Optional[Dict[str, Any]] = None) -> ProcessingResult:
+        """Process a document file (PDF or Markdown) with intelligent caching.
+
+        Routes to appropriate processor based on file extension.
+
+        Args:
+            file_path: Path to the document file.
+            metadata: Optional metadata to associate with the document.
+
+        Returns:
+            ProcessingResult with the processed document or error information.
+        """
+        # Determine document type and route to appropriate processor
+        suffix = file_path.suffix.lower()
+        if suffix == ".pdf":
+            return await self.process_pdf(file_path, metadata)
+        elif suffix in [".md", ".markdown"]:
+            return await self.process_markdown(file_path, metadata)
+        else:
+            return ProcessingResult(success=False, error=f"Unsupported document type: {suffix}", processing_time=0)
+
     async def process_pdf(self, file_path: Path, metadata: Optional[Dict[str, Any]] = None) -> ProcessingResult:
         """Process a PDF file with intelligent caching and selective stage processing.
 
@@ -563,9 +620,9 @@ class PDFProcessor:
                 logger.info("✓ PDF parsing completed")
 
             # Extract title and create document structure
-            title = await self._extract_title_from_markdown(
-                file_path, parse_result.markdown_content, parse_result.metadata
-            )
+            # Get combined markdown for title extraction
+            combined_markdown = parse_result.get_combined_markdown()
+            title = await self._extract_title_from_markdown(file_path, combined_markdown, parse_result.metadata)
             combined_metadata = {**(metadata or {}), **parse_result.metadata}
             document = Document(
                 path=str(file_path),
@@ -573,7 +630,7 @@ class PDFProcessor:
                 metadata=combined_metadata,
                 checksum=checksum,
                 file_size=file_path.stat().st_size,
-                page_count=parse_result.metadata.get("page_count", 0),
+                page_count=len(parse_result.pages),
             )
 
             # Stage 2: Chunking (with cache check)
@@ -592,7 +649,13 @@ class PDFProcessor:
 
             if not chunks:
                 logger.info("→ Performing text chunking...")
-                chunks = self.chunker.chunk(parse_result.markdown_content, parse_result.metadata)
+                # Check if chunker supports page-aware chunking
+                if hasattr(self.chunker, "chunk_pages"):
+                    chunks = self.chunker.chunk_pages(parse_result.pages, parse_result.metadata)
+                else:
+                    # Fall back to combined markdown
+                    combined_markdown = parse_result.get_combined_markdown()
+                    chunks = self.chunker.chunk(combined_markdown, parse_result.metadata)
 
                 # Add chunks to document with proper document_id
                 for i, chunk in enumerate(chunks):
@@ -646,6 +709,151 @@ class PDFProcessor:
         except Exception as e:
             processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             logger.error(f"Failed to process PDF {file_path}: {e}")
+            return ProcessingResult(
+                success=False,
+                error=str(e),
+                processing_time=processing_time,
+            )
+
+    async def process_markdown(self, file_path: Path, metadata: Optional[Dict[str, Any]] = None) -> ProcessingResult:
+        """Process a Markdown file.
+
+        Markdown processing is simpler than PDF as content is already in markdown format.
+        We skip the parsing cache since reading markdown is fast, but still use
+        chunking and embedding caches.
+
+        Args:
+            file_path: Path to the Markdown file.
+            metadata: Optional metadata to associate with the document.
+
+        Returns:
+            ProcessingResult with the processed document or error information.
+        """
+        start_time = datetime.now(timezone.utc)
+        cache_stats = {"parsing_cache_hit": False, "chunking_cache_hit": False}
+
+        try:
+            logger.info(f"Processing Markdown document: {file_path}")
+
+            # Validate file exists and is readable
+            if not file_path.exists():
+                raise DocumentProcessingError(f"File not found: {file_path}", str(file_path))
+
+            if not file_path.suffix.lower() in [".md", ".markdown"]:
+                raise DocumentProcessingError(f"Not a Markdown file: {file_path}", str(file_path))
+
+            # Calculate file checksum for cache validation
+            checksum = await self._calculate_checksum(file_path)
+
+            # Stage 1: Parse Markdown (no caching needed - direct read is fast)
+            logger.info("→ Parsing Markdown file...")
+            markdown_config = {
+                "parse_frontmatter": getattr(self.config, "markdown_parse_frontmatter", True),
+                "extract_title": getattr(self.config, "markdown_extract_title", True),
+                "page_boundary_pattern": getattr(
+                    self.config, "markdown_page_boundary_pattern", r"--\[PAGE:\s*(\d+)\]--"
+                ),
+                "split_on_page_boundaries": getattr(self.config, "markdown_split_on_page_boundaries", True),
+            }
+            markdown_parser = MarkdownParser(config=markdown_config)
+            parse_result = await markdown_parser.parse(file_path)
+            parse_result.metadata["processing_timestamp"] = datetime.now(timezone.utc).isoformat()
+            logger.info("✓ Markdown parsing completed")
+
+            # Extract title and create document structure
+            combined_markdown = parse_result.get_combined_markdown()
+            title = parse_result.metadata.get("title") or await self._extract_title_from_markdown(
+                file_path, combined_markdown, parse_result.metadata
+            )
+            combined_metadata = {**(metadata or {}), **parse_result.metadata}
+
+            # Use page_count from metadata if available (set by markdown parser when page boundaries exist)
+            # Otherwise use the number of pages from parse_result
+            page_count = parse_result.metadata.get("page_count", len(parse_result.pages))
+
+            document = Document(
+                path=str(file_path),
+                title=title,
+                metadata=combined_metadata,
+                checksum=checksum,
+                file_size=file_path.stat().st_size,
+                page_count=page_count,
+            )
+
+            # Stage 2: Chunking (with cache check)
+            chunks = None
+            if self.cache_manager and self.cache_manager.is_chunking_cache_valid(checksum):
+                chunks = await self._load_chunking_result(file_path, checksum)
+                if chunks:
+                    cache_stats["chunking_cache_hit"] = True
+                    logger.info("✓ Using cached chunking result")
+
+                    # Update document_id in cached chunks
+                    for i, chunk in enumerate(chunks):
+                        chunk.chunk_index = i
+                        chunk.document_id = document.id
+                        document.add_chunk(chunk)
+
+            if not chunks:
+                logger.info("→ Performing text chunking...")
+                # Check if chunker supports page-aware chunking
+                if hasattr(self.chunker, "chunk_pages"):
+                    chunks = self.chunker.chunk_pages(parse_result.pages, parse_result.metadata)
+                else:
+                    # Fall back to combined markdown
+                    combined_markdown = parse_result.get_combined_markdown()
+                    chunks = self.chunker.chunk(combined_markdown, parse_result.metadata)
+
+                # Add chunks to document with proper document_id
+                for i, chunk in enumerate(chunks):
+                    chunk.chunk_index = i
+                    chunk.document_id = document.id
+                    document.add_chunk(chunk)
+
+                # Cache the chunking result if cache manager is available
+                if self.cache_manager:
+                    await self._save_chunking_result(file_path, chunks, checksum)
+
+                logger.info("✓ Text chunking completed")
+
+            # Stage 3: Embedding generation (always check if embeddings need regeneration)
+            embedding_needed = True
+            if self.cache_manager and self.cache_manager.is_embedding_cache_valid(checksum):
+                # Check if chunks already have embeddings
+                if all(chunk.has_embedding for chunk in document.chunks):
+                    embedding_needed = False
+                    logger.info("✓ Using existing embeddings")
+
+            if embedding_needed:
+                logger.info("→ Generating embeddings...")
+                await self._generate_embeddings(document)
+                logger.info("✓ Embedding generation completed")
+
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+
+            # Log cache efficiency
+            cache_info = []
+            if cache_stats["chunking_cache_hit"]:
+                cache_info.append("chunking cached")
+
+            cache_summary = f" ({', '.join(cache_info)})" if cache_info else " (no cache hits)"
+
+            logger.info(
+                f"Successfully processed Markdown: {file_path} ({len(chunks)} chunks "
+                f"in {processing_time:.2f}s{cache_summary})"
+            )
+
+            return ProcessingResult(
+                success=True,
+                document=document,
+                processing_time=processing_time,
+                chunks_created=len(chunks),
+                embeddings_generated=len([c for c in chunks if c.has_embedding]),
+            )
+
+        except Exception as e:
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            logger.error(f"Failed to process Markdown {file_path}: {e}")
             return ProcessingResult(
                 success=False,
                 error=str(e),
@@ -923,3 +1131,7 @@ class PDFProcessor:
 
         except Exception:
             return False
+
+
+# Backward compatibility alias
+PDFProcessor = DocumentProcessor

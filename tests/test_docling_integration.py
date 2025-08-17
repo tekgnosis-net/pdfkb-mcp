@@ -6,9 +6,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.pdfkb.config import ServerConfig
-from src.pdfkb.parsers.parser_docling import DoclingParser
-from src.pdfkb.pdf_processor import PDFProcessor
+from pdfkb.config import ServerConfig
+from pdfkb.document_processor import DocumentProcessor as PDFProcessor
+from pdfkb.parsers.parser_docling import DoclingParser
 
 
 class TestDoclingIntegration:
@@ -68,7 +68,7 @@ class TestDoclingIntegration:
             assert docling_config.get("table_processing_mode") == "ACCURATE"
             assert docling_config.get("formula_enrichment") is True
 
-    @patch("src.pdfkb.parsers.parser_docling.DoclingParser._check_ocr_engine_available")
+    @patch("pdfkb.parsers.parser_docling.DoclingParser._check_ocr_engine_available")
     def test_pdf_processor_docling_integration(self, mock_ocr_check, mock_embedding_service, temp_pdf_file):
         """Test DoclingParser integration with PDFProcessor."""
         mock_ocr_check.return_value = True
@@ -106,7 +106,7 @@ class TestDoclingIntegration:
 
         # Mock docling import failure
         with patch(
-            "src.pdfkb.parsers.parser_docling.DoclingParser.__init__",
+            "pdfkb.parsers.parser_docling.DoclingParser.__init__",
             side_effect=ImportError("No module named 'docling'"),
         ):
 
@@ -117,7 +117,7 @@ class TestDoclingIntegration:
             assert not isinstance(processor.parser, DoclingParser)
             # The specific fallback parser depends on what's available
 
-    @patch("src.pdfkb.parsers.parser_docling.DoclingParser._check_ocr_engine_available")
+    @patch("pdfkb.parsers.parser_docling.DoclingParser._check_ocr_engine_available")
     async def test_docling_parser_with_pdf_processor_processing(
         self, mock_ocr_check, mock_embedding_service, temp_pdf_file
     ):
@@ -129,7 +129,7 @@ class TestDoclingIntegration:
             {
                 "OPENAI_API_KEY": "sk-test-key-12345",
                 "PDFKB_PDF_PARSER": "docling",
-                "PDFKB_PDF_CHUNKER": "langchain",
+                "PDFKB_DOCUMENT_CHUNKER": "langchain",
             },
             clear=True,
         ):
@@ -243,14 +243,14 @@ class TestDoclingParserRegistry:
 
     def test_docling_parser_in_imports(self):
         """Test that DoclingParser is available in parser imports."""
-        from src.pdfkb.parsers import DoclingParser as ImportedDoclingParser
-        from src.pdfkb.parsers.parser_docling import DoclingParser as DirectDoclingParser
+        from pdfkb.parsers import DoclingParser as ImportedDoclingParser
+        from pdfkb.parsers.parser_docling import DoclingParser as DirectDoclingParser
 
         assert ImportedDoclingParser is DirectDoclingParser
 
     def test_docling_parser_in_all_exports(self):
         """Test that DoclingParser is in __all__ exports."""
-        from src.pdfkb.parsers import __all__ as parser_exports
+        from pdfkb.parsers import __all__ as parser_exports
 
         assert "DoclingParser" in parser_exports
 

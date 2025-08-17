@@ -1,16 +1,17 @@
 """PDF parser using pymupdf4llm library with robust error handling."""
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .parser import ParseResult, PDFParser
+from .parser import DocumentParser, PageContent, ParseResult
 
 logger = logging.getLogger(__name__)
 
 
-class PyMuPDF4LLMParser(PDFParser):
+class PyMuPDF4LLMParser(DocumentParser):
     """PDF parser using pymupdf4llm library with robust error handling for complex PDFs."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, cache_dir: Optional[Path] = None):
@@ -28,13 +29,13 @@ class PyMuPDF4LLMParser(PDFParser):
         self.min_words_count = self.config.get("min_words_count", 5)  # Min words to consider page has text
 
     async def parse(self, file_path: Path) -> ParseResult:
-        """Parse a PDF file using pymupdf4llm library with robust error handling.
+        """Parse a PDF file using pymupdf4llm library with page-aware extraction.
 
         Args:
             file_path: Path to the PDF file.
 
         Returns:
-            ParseResult with markdown content and metadata.
+            ParseResult with page-aware content and metadata.
         """
         try:
             # Check cache first
@@ -43,10 +44,10 @@ class PyMuPDF4LLMParser(PDFParser):
                 cache_path = self._get_cache_path(file_path)
                 if self._is_cache_valid(file_path, cache_path):
                     logger.debug(f"Loading parsed content from cache: {cache_path}")
-                    markdown_content = self._load_from_cache(cache_path)
+                    cached_pages = self._load_pages_from_cache(cache_path)
                     metadata = self._load_metadata_from_cache(cache_path)
-                    if markdown_content is not None and metadata:
-                        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                    if cached_pages is not None and metadata:
+                        return ParseResult(pages=cached_pages, metadata=metadata)
 
             # Try the fast path first with pymupdf4llm
             try:
@@ -55,7 +56,7 @@ class PyMuPDF4LLMParser(PDFParser):
                 # Save to cache if enabled
                 if cache_path:
                     logger.debug(f"Saving parsed content to cache: {cache_path}")
-                    self._save_to_cache(cache_path, result.markdown_content)
+                    self._save_pages_to_cache(cache_path, result.pages)
                     self._save_metadata_to_cache(cache_path, result.metadata)
 
                 return result
@@ -69,7 +70,7 @@ class PyMuPDF4LLMParser(PDFParser):
                     # Save to cache if enabled
                     if cache_path:
                         logger.debug(f"Saving parsed content to cache: {cache_path}")
-                        self._save_to_cache(cache_path, result.markdown_content)
+                        self._save_pages_to_cache(cache_path, result.pages)
                         self._save_metadata_to_cache(cache_path, result.metadata)
 
                     return result
@@ -82,17 +83,18 @@ class PyMuPDF4LLMParser(PDFParser):
             raise RuntimeError(f"Failed to parse PDF with PyMuPDF4LLM: {e}") from e
 
     async def _parse_with_pymupdf4llm(self, file_path: Path) -> ParseResult:
-        """Try standard pymupdf4llm parsing.
+        """Try standard pymupdf4llm parsing with page-by-page extraction.
 
         Args:
             file_path: Path to the PDF file.
 
         Returns:
-            ParseResult with markdown content and metadata.
+            ParseResult with page-aware content and metadata.
         """
+        import fitz  # PyMuPDF
         import pymupdf4llm
 
-        logger.debug(f"Attempting standard PyMuPDF4LLM parsing: {file_path}")
+        logger.debug(f"Attempting page-by-page PyMuPDF4LLM parsing: {file_path}")
 
         # Extract text using pymupdf4llm with configuration
         config_copy = dict(self.config)
@@ -102,33 +104,70 @@ class PyMuPDF4LLMParser(PDFParser):
         config_copy.pop("min_text_length", None)
         config_copy.pop("min_words_count", None)
 
-        # Use pymupdf4llm to convert PDF to markdown
+        # Open the PDF to get page count
+        doc = fitz.open(str(file_path))
+        total_pages = doc.page_count
+        doc.close()
+
+        # Extract each page individually
+        pages = []
         loop = asyncio.get_running_loop()
-        md_text = await loop.run_in_executor(
-            None,
-            lambda: pymupdf4llm.to_markdown(
-                str(file_path),
-                page_chunks=True,  # Process by page for better chunking
-                show_progress=True,
-                **config_copy,
-            ),
-        )
 
-        # Convert markdown text to proper format
-        markdown_content = self._process_markdown_text(md_text)
+        for page_num in range(total_pages):
+            try:
+                # Extract markdown for this specific page
+                page_md = await loop.run_in_executor(
+                    None,
+                    lambda pn=page_num: pymupdf4llm.to_markdown(
+                        str(file_path),
+                        pages=[pn],  # Extract only this page
+                        **config_copy,
+                    ),
+                )
 
-        # Extract metadata
+                # Process the markdown content for this page
+                if isinstance(page_md, list) and page_md:
+                    # If it returns a list, get the first element
+                    page_content = page_md[0].get("text", "") if isinstance(page_md[0], dict) else str(page_md[0])
+                else:
+                    page_content = str(page_md) if page_md else ""
+
+                # Create PageContent for this page
+                page = PageContent(
+                    page_number=page_num + 1,  # 1-indexed page numbers
+                    markdown_content=page_content,
+                    metadata={"page_index": page_num},
+                )
+                pages.append(page)
+
+                # Log progress every 10 pages
+                if (page_num + 1) % 10 == 0:
+                    logger.debug(f"Processed {page_num + 1}/{total_pages} pages")
+
+            except Exception as e:
+                logger.warning(f"Failed to extract page {page_num + 1}: {e}")
+                # Add empty page with error message
+                pages.append(
+                    PageContent(
+                        page_number=page_num + 1,
+                        markdown_content=f"[Page {page_num + 1}: Extraction failed - {e}]",
+                        metadata={"extraction_error": str(e), "page_index": page_num},
+                    )
+                )
+
+        # Extract document metadata
         metadata = self._extract_metadata(file_path)
 
         # Add processing information
         metadata["processing_timestamp"] = "N/A"  # Will be set by PDFProcessor
         metadata["processor_version"] = "pymupdf4llm"
-        metadata["extraction_method"] = "standard"
+        metadata["extraction_method"] = "page-by-page"
         metadata["source_filename"] = file_path.name
         metadata["source_directory"] = str(file_path.parent)
+        metadata["total_pages"] = total_pages
 
-        logger.debug("Successfully extracted markdown content using standard PyMuPDF4LLM")
-        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+        logger.debug(f"Successfully extracted {len(pages)} pages using PyMuPDF4LLM")
+        return ParseResult(pages=pages, metadata=metadata)
 
     async def _parse_robust(self, file_path: Path) -> ParseResult:
         """Robust page-by-page extraction with error handling and OCR fallback.
@@ -137,7 +176,7 @@ class PyMuPDF4LLMParser(PDFParser):
             file_path: Path to the PDF file.
 
         Returns:
-            ParseResult with markdown content and metadata.
+            ParseResult with page-aware content and metadata.
         """
         import fitz  # PyMuPDF
 
@@ -145,7 +184,7 @@ class PyMuPDF4LLMParser(PDFParser):
 
         # Open document
         doc = fitz.open(str(file_path))
-        pages_content = []
+        pages = []
         ocr_pages = []
         failed_pages = []
 
@@ -157,6 +196,7 @@ class PyMuPDF4LLMParser(PDFParser):
                     page = doc[page_num]
                     page_text = ""
                     extraction_method = "native"
+                    page_metadata = {"page_index": page_num}
 
                     # Try native text extraction first
                     try:
@@ -187,15 +227,22 @@ class PyMuPDF4LLMParser(PDFParser):
                                 ocr_pages.append(page_num + 1)
                             except Exception as ocr_e:
                                 logger.error(f"OCR also failed for page {page_num + 1}: {ocr_e}")
-                                page_text = f"[Page {page_num + 1}: Extraction failed]"
+                                page_text = "[Extraction failed]"
+                                page_metadata["extraction_error"] = str(ocr_e)
                                 failed_pages.append(page_num + 1)
                         else:
-                            page_text = f"[Page {page_num + 1}: Extraction failed]"
+                            page_text = "[Extraction failed]"
+                            page_metadata["extraction_error"] = str(e)
                             failed_pages.append(page_num + 1)
 
-                    # Format page content as markdown
-                    page_md = self._format_page_markdown(page_num + 1, page_text, extraction_method)
-                    pages_content.append(page_md)
+                    # Add extraction method to metadata
+                    page_metadata["extraction_method"] = extraction_method
+
+                    # Create PageContent for this page
+                    page_content = PageContent(
+                        page_number=page_num + 1, markdown_content=page_text, metadata=page_metadata
+                    )
+                    pages.append(page_content)
 
                     # Show progress
                     if page_num % 10 == 0:
@@ -203,11 +250,14 @@ class PyMuPDF4LLMParser(PDFParser):
 
                 except Exception as e:
                     logger.error(f"Failed to process page {page_num + 1}: {e}")
-                    pages_content.append(f"# Page {page_num + 1}\n\n[Extraction failed: {e}]\n")
+                    pages.append(
+                        PageContent(
+                            page_number=page_num + 1,
+                            markdown_content=f"[Extraction failed: {e}]",
+                            metadata={"extraction_error": str(e), "page_index": page_num},
+                        )
+                    )
                     failed_pages.append(page_num + 1)
-
-            # Combine all pages
-            markdown_content = "\n\n".join(pages_content)
 
             # Extract metadata
             metadata = self._extract_metadata_from_doc(doc, file_path)
@@ -229,7 +279,7 @@ class PyMuPDF4LLMParser(PDFParser):
             if failed_pages:
                 logger.warning(f"Failed to extract {len(failed_pages)} pages: {failed_pages[:10]}...")
 
-            return ParseResult(markdown_content=markdown_content, metadata=metadata)
+            return ParseResult(pages=pages, metadata=metadata)
 
         finally:
             doc.close()
@@ -395,3 +445,59 @@ class PyMuPDF4LLMParser(PDFParser):
             metadata["page_count"] = 1  # Default fallback
 
         return metadata
+
+    def _save_pages_to_cache(self, cache_path: Path, pages: List[PageContent]) -> None:
+        """Save pages to cache as JSON.
+
+        Args:
+            cache_path: Path to the cache file.
+            pages: List of PageContent objects to save.
+        """
+        try:
+            pages_data = []
+            for page in pages:
+                pages_data.append(
+                    {
+                        "page_number": page.page_number,
+                        "markdown_content": page.markdown_content,
+                        "metadata": page.metadata,
+                    }
+                )
+
+            pages_path = cache_path.with_suffix(".pages.json")
+            with open(pages_path, "w", encoding="utf-8") as f:
+                json.dump(pages_data, f, indent=2, default=str)
+        except Exception as e:
+            logger.warning(f"Failed to save pages to cache {pages_path}: {e}")
+
+    def _load_pages_from_cache(self, cache_path: Path) -> Optional[List[PageContent]]:
+        """Load pages from cache.
+
+        Args:
+            cache_path: Path to the cache file.
+
+        Returns:
+            List of PageContent objects or None if cache is invalid.
+        """
+        try:
+            pages_path = cache_path.with_suffix(".pages.json")
+            if not pages_path.exists():
+                return None
+
+            with open(pages_path, "r", encoding="utf-8") as f:
+                pages_data = json.load(f)
+
+            pages = []
+            for page_data in pages_data:
+                pages.append(
+                    PageContent(
+                        page_number=page_data["page_number"],
+                        markdown_content=page_data["markdown_content"],
+                        metadata=page_data.get("metadata", {}),
+                    )
+                )
+
+            return pages
+        except Exception as e:
+            logger.warning(f"Failed to load pages from cache {cache_path}: {e}")
+            return None

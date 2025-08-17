@@ -1,16 +1,26 @@
 """Tests for the PDF processor module."""
 
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from pdfkb.config import ServerConfig
-from pdfkb.pdf_processor import PDFProcessor
+from pdfkb.document_processor import DocumentProcessor as PDFProcessor
 
 
 class TestPDFProcessor:
     """Test cases for PDFProcessor class."""
+
+    @pytest.fixture
+    def sample_pdf(self, tmp_path):
+        """Provide a copy of the sample PDF for testing."""
+        # Copy the sample PDF to a temp location to avoid modifying the original
+        sample_pdf_path = Path(__file__).parent / "sample.pdf"
+        test_pdf_path = tmp_path / "test.pdf"
+        shutil.copy(sample_pdf_path, test_pdf_path)
+        return test_pdf_path
 
     @pytest.fixture
     def config(self):
@@ -43,13 +53,9 @@ class TestPDFProcessor:
         assert "File not found" in result.error
 
     @pytest.mark.asyncio
-    async def test_validate_pdf_valid_file(self, processor, tmp_path):
+    async def test_validate_pdf_valid_file(self, processor, sample_pdf):
         """Test validating a valid PDF file."""
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
-
-        is_valid = await processor.validate_pdf(pdf_file)
+        is_valid = await processor.validate_pdf(sample_pdf)
         assert is_valid
 
     @pytest.mark.asyncio

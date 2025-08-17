@@ -243,7 +243,7 @@ class TestWebIntegration:
 
             # Test WebDocumentService
             doc_service = WebDocumentService(
-                pdf_processor=mcp_server.pdf_processor,
+                document_processor=mcp_server.document_processor,
                 vector_store=mcp_server.vector_store,
                 document_cache=mcp_server._document_cache,
                 save_cache_callback=mcp_server._save_document_cache,
@@ -287,7 +287,7 @@ class TestWebIntegration:
             # Create web server
             web_server = PDFKnowledgebaseWebServer(
                 config=temp_config,
-                pdf_processor=mcp_server.pdf_processor,
+                document_processor=mcp_server.document_processor,
                 vector_store=mcp_server.vector_store,
                 embedding_service=mcp_server.embedding_service,
                 document_cache=mcp_server._document_cache,

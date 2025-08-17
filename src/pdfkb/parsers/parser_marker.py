@@ -5,12 +5,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .parser import ParseResult, PDFParser
+from .parser import DocumentParser, PageContent, ParseResult
 
 logger = logging.getLogger(__name__)
 
 
-class MarkerPDFParser(PDFParser):
+class MarkerPDFParser(DocumentParser):
     """PDF parser using the Marker library."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, cache_dir: Path = None):
@@ -42,7 +42,10 @@ class MarkerPDFParser(PDFParser):
                     markdown_content = self._load_from_cache(cache_path)
                     metadata = self._load_metadata_from_cache(cache_path)
                     if markdown_content is not None and metadata:
-                        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                        # Create page-aware result
+                        # TODO: Implement proper page extraction for this parser
+                        pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+                        return ParseResult(pages=pages, metadata=metadata)
 
             from marker.config.parser import ConfigParser
             from marker.converters.pdf import PdfConverter
@@ -179,7 +182,10 @@ class MarkerPDFParser(PDFParser):
                 self._save_metadata_to_cache(cache_path, metadata)
 
             logger.debug("Extracted markdown content from PDF using Marker")
-            return ParseResult(markdown_content=markdown_content, metadata=metadata)
+            # Create page-aware result
+            # TODO: Implement proper page extraction for this parser
+            pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+            return ParseResult(pages=pages, metadata=metadata)
 
         except ImportError:
             raise ImportError("Marker library not available. Install with: pip install pdfkb-mcp[marker]")

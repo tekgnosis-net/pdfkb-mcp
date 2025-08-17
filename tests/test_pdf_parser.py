@@ -1,17 +1,28 @@
 """Tests for the PDF parser module."""
 
+import shutil
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from pdfkb.config import ServerConfig
+from pdfkb.document_processor import DocumentProcessor as PDFProcessor
 from pdfkb.exceptions import PDFProcessingError
 from pdfkb.parsers import ParseResult, PyMuPDF4LLMParser, UnstructuredPDFParser
-from pdfkb.pdf_processor import PDFProcessor
 
 
 class TestPDFParser:
     """Test cases for PDFParser classes."""
+
+    @pytest.fixture
+    def sample_pdf(self, tmp_path):
+        """Provide a copy of the sample PDF for testing."""
+        # Copy the sample PDF to a temp location to avoid modifying the original
+        sample_pdf_path = Path(__file__).parent / "sample.pdf"
+        test_pdf_path = tmp_path / "test.pdf"
+        shutil.copy(sample_pdf_path, test_pdf_path)
+        return test_pdf_path
 
     @pytest.fixture
     def config(self):
@@ -42,11 +53,9 @@ class TestPDFParser:
         assert parser.config == {}
 
     @pytest.mark.asyncio
-    async def test_unstructured_parser_parse(self, tmp_path):
+    async def test_unstructured_parser_parse(self, sample_pdf):
         """Test UnstructuredPDFParser parse method."""
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
+        pdf_file = sample_pdf
 
         # Mock the unstructured partition function at the correct location
         with patch("unstructured.partition.pdf.partition_pdf") as mock_partition:
@@ -56,59 +65,55 @@ class TestPDFParser:
             result = await parser.parse(pdf_file)
 
             assert isinstance(result, ParseResult)
-            assert len(result.markdown_content) > 0
+            assert len(result.pages) > 0
+            assert len(result.pages[0].markdown_content) > 0
             assert "processor_version" in result.metadata
             assert result.metadata["processor_version"] == "unstructured"
 
     @pytest.mark.asyncio
-    async def test_pymupdf4llm_parser_parse(self, tmp_path):
+    async def test_pymupdf4llm_parser_parse(self, sample_pdf):
         """Test PyMuPDF4LLMParser parse method."""
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
+        pdf_file = sample_pdf
 
-        # Mock the pymupdf4llm to_markdown function at the correct location
-        with patch("pymupdf4llm.to_markdown") as mock_to_markdown:
-            mock_to_markdown.return_value = "# Test Title\n\nThis is test content."
+        # Test with real PDF parsing
+        parser = PyMuPDF4LLMParser()
+        result = await parser.parse(pdf_file)
 
-            parser = PyMuPDF4LLMParser()
-            result = await parser.parse(pdf_file)
-
-            assert isinstance(result, ParseResult)
-            assert len(result.markdown_content) > 0
-            assert "processor_version" in result.metadata
-            assert result.metadata["processor_version"] == "pymupdf4llm"
+        assert isinstance(result, ParseResult)
+        assert len(result.pages) > 0
+        # Some pages might be empty (e.g., cover pages), so check that at least one page has content
+        pages_with_content = [p for p in result.pages if len(p.markdown_content) > 0]
+        assert len(pages_with_content) > 0, "At least one page should have content"
+        assert "processor_version" in result.metadata
+        assert result.metadata["processor_version"] == "pymupdf4llm"
 
     @pytest.mark.asyncio
-    async def test_pymupdf4llm_parser_parse_with_pages(self, tmp_path):
+    async def test_pymupdf4llm_parser_parse_with_pages(self, sample_pdf):
         """Test PyMuPDF4LLMParser parse method with page chunks."""
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
+        pdf_file = sample_pdf
 
-        # Mock the pymupdf4llm to_markdown function at the correct location
-        with patch("pymupdf4llm.to_markdown") as mock_to_markdown:
-            mock_to_markdown.return_value = [
-                {"text": "# Page 1 Title\n\nPage 1 content."},
-                {"text": "# Page 2 Title\n\nPage 2 content."},
-            ]
+        # Test with real PDF parsing - sample.pdf should have multiple pages
+        parser = PyMuPDF4LLMParser()
+        result = await parser.parse(pdf_file)
 
-            parser = PyMuPDF4LLMParser()
-            result = await parser.parse(pdf_file)
+        assert isinstance(result, ParseResult)
+        assert len(result.pages) > 0  # Should have at least one page
 
-            assert isinstance(result, ParseResult)
-            assert len(result.markdown_content) > 0
-            assert "processor_version" in result.metadata
+        # Check that pages are properly numbered and at least some have content
+        pages_with_content = 0
+        for page in result.pages:
+            assert page.page_number > 0
+            if len(page.markdown_content) > 0:
+                pages_with_content += 1
+
+        assert pages_with_content > 0, "At least one page should have content"
+        assert "processor_version" in result.metadata
 
     @pytest.mark.asyncio
-    async def test_pdf_processor_with_unstructured_parser(self, config, embedding_service, tmp_path):
+    async def test_pdf_processor_with_unstructured_parser(self, config, embedding_service, sample_pdf):
         """Test PDFProcessor with Unstructured parser."""
         # Create a config with unstructured parser
         config.pdf_parser = "unstructured"
-
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
 
         # Mock the unstructured partition function
         with patch("unstructured.partition.pdf.partition_pdf") as mock_partition:
@@ -118,31 +123,20 @@ class TestPDFParser:
             assert isinstance(processor.parser, UnstructuredPDFParser)
 
     @pytest.mark.asyncio
-    async def test_pdf_processor_with_pymupdf4llm_parser(self, config, embedding_service, tmp_path):
+    async def test_pdf_processor_with_pymupdf4llm_parser(self, config, embedding_service, sample_pdf):
         """Test PDFProcessor with PyMuPDF4LLM parser."""
         # Create a config with pymupdf4llm parser
         config.pdf_parser = "pymupdf4llm"
 
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
-
-        # Mock the pymupdf4llm to_markdown function
-        with patch("pymupdf4llm.to_markdown") as mock_to_markdown:
-            mock_to_markdown.return_value = "# Test Title\n\nThis is test content."
-
-            processor = PDFProcessor(config, embedding_service)
-            assert isinstance(processor.parser, PyMuPDF4LLMParser)
+        # Just test that the processor creates the right parser type
+        processor = PDFProcessor(config, embedding_service)
+        assert isinstance(processor.parser, PyMuPDF4LLMParser)
 
     @pytest.mark.asyncio
-    async def test_pdf_processor_parser_fallback(self, config, embedding_service, tmp_path):
+    async def test_pdf_processor_parser_fallback(self, config, embedding_service, sample_pdf):
         """Test PDFProcessor parser fallback when primary parser is not available."""
         # Create a config with pymupdf4llm parser
         config.pdf_parser = "pymupdf4llm"
-
-        # Create a dummy PDF file
-        pdf_file = tmp_path / "test.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4\ntest content")
 
         # Mock the PyMuPDF4LLMParser to raise ImportError during construction
         with patch("pdfkb.parsers.parser_pymupdf4llm.PyMuPDF4LLMParser.__init__") as mock_pymupdf_init:

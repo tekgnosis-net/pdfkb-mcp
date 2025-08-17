@@ -1,8 +1,8 @@
-# PDF Knowledgebase MCP Server - System Design
+# Document Knowledgebase MCP Server - System Design
 
 ## Executive Summary
 
-PDF Knowledgebase MCP Server is a sophisticated document processing and retrieval system that implements the Model Context Protocol (MCP) for seamless integration with AI assistants like Claude Desktop. The system provides intelligent PDF processing, multiple embedding strategies, hybrid search capabilities, and both MCP protocol and web interfaces for maximum flexibility.
+Document Knowledgebase MCP Server is a sophisticated document processing and retrieval system supporting both PDF and Markdown formats that implements the Model Context Protocol (MCP) for seamless integration with AI assistants like Claude Desktop. The system provides intelligent PDF processing, multiple embedding strategies, hybrid search capabilities, and both MCP protocol and web interfaces for maximum flexibility.
 
 ## Architecture Overview
 
@@ -21,8 +21,8 @@ graph TB
     end
 
     subgraph "Processing Pipeline"
-        PDF_PROC[PDF Processor<br/>Orchestrator]
-        PARSERS[Parser Engines<br/>PyMuPDF/Marker/MinerU/<br/>Docling/LLM]
+        DOC_PROC[Document Processor<br/>Orchestrator]
+        PARSERS[Parser Engines<br/>PDF: PyMuPDF/Marker/MinerU/<br/>Docling/LLM<br/>Markdown: Native]
         CHUNKERS[Chunking Engines<br/>LangChain/Semantic/<br/>Unstructured]
         EMBED[Embedding Service<br/>Local/OpenAI]
     end
@@ -46,10 +46,10 @@ graph TB
     MCP_CLIENT --> MCP_SERVER
     WEB_CLIENT --> WEB_SERVER
 
-    MCP_SERVER --> PDF_PROC
-    WEB_SERVER --> PDF_PROC
+    MCP_SERVER --> DOC_PROC
+    WEB_SERVER --> DOC_PROC
 
-    PDF_PROC --> PARSERS
+    DOC_PROC --> PARSERS
     PARSERS --> CHUNKERS
     CHUNKERS --> EMBED
 
@@ -65,7 +65,7 @@ graph TB
     HYBRID --> MCP_SERVER
     HYBRID --> WEB_SERVER
 
-    QUEUE --> PDF_PROC
+    QUEUE --> DOC_PROC
     MONITOR --> QUEUE
 
     WEB_SERVER -.->|WebSocket| WEB_CLIENT
@@ -77,7 +77,7 @@ graph TB
     classDef background fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
 
     class MCP_SERVER,WEB_SERVER interface
-    class PDF_PROC,PARSERS,CHUNKERS,EMBED processing
+    class DOC_PROC,PARSERS,CHUNKERS,EMBED processing
     class CACHE,VECTOR_DB,TEXT_IDX,DOC_CACHE storage
     class HYBRID search
     class QUEUE,MONITOR background
@@ -90,7 +90,7 @@ graph TB
 **Location**: `src/pdfkb/main.py`
 
 The MCP server is built using FastMCP and provides the following tools:
-- `add_document`: Add PDFs to the knowledgebase with optional metadata
+- `add_document`: Add documents (PDFs or Markdown) to the knowledgebase with optional metadata
 - `search_documents`: Hybrid search combining semantic and keyword matching
 - `list_documents`: List all documents with filtering capabilities
 - `remove_document`: Remove documents from the knowledgebase
@@ -121,14 +121,18 @@ A modern FastAPI-based web server providing:
   - `websocket_manager.py`: Real-time communication
 - **Models**: `web/models/` - Pydantic models for API contracts
 
-### 3. PDF Processing Pipeline
+### 3. Document Processing Pipeline
 
-**Location**: `src/pdfkb/pdf_processor.py`
+**Location**: `src/pdfkb/document_processor.py`
 
 The processing pipeline implements a sophisticated two-step architecture:
 
-#### Step 1: PDF Parsing
-Converts PDF documents to Markdown format using various parser engines:
+#### Step 1: Document Parsing
+
+All parsers now output page-aware content, providing a list of pages with individual markdown content and metadata, enabling better document structure preservation.
+
+**For PDF Documents:**
+Converts PDF documents to page-aware Markdown format using various parser engines:
 
 **Available Parsers** (`src/pdfkb/parsers/`):
 1. **PyMuPDF4LLM** (`parser_pymupdf4llm.py`)
@@ -156,8 +160,17 @@ Converts PDF documents to Markdown format using various parser engines:
    - Perfect for complex layouts
    - Handles any document type with high accuracy
 
+**For Markdown Documents:**
+- **Native Parser** (`parser_markdown.py`)
+  - Direct reading with no conversion needed
+  - Page boundary detection using configurable regex patterns
+  - Splits on patterns like `--[PAGE: 142]--` for page-aware output
+  - YAML/TOML frontmatter extraction
+  - Title extraction from H1 headers
+  - Metadata statistics (word count, headings, etc.)
+
 #### Step 2: Text Chunking
-Splits Markdown content into semantically meaningful chunks:
+Splits content (whether from PDF or native Markdown) into semantically meaningful chunks:
 
 **Available Chunkers** (`src/pdfkb/chunker/`):
 1. **LangChain** (`chunker_langchain.py`)
@@ -165,12 +178,18 @@ Splits Markdown content into semantically meaningful chunks:
    - Configurable chunk size and overlap
    - Preserves document hierarchy
 
-2. **Semantic** (`chunker_semantic.py`)
+2. **Page** (`chunker_page.py`)
+   - Page-based chunking for page-aware documents
+   - Creates chunks on natural page boundaries
+   - Supports merging small pages and splitting large ones
+   - Preserves page metadata in chunks
+
+3. **Semantic** (`chunker_semantic.py`)
    - Advanced embedding-based chunking
    - Groups semantically related content
    - Multiple breakpoint detection methods
 
-3. **Unstructured** (`chunker_unstructured.py`)
+4. **Unstructured** (`chunker_unstructured.py`)
    - Zero-configuration intelligent chunking
    - Uses "by_title" strategy
    - Optimal default parameters

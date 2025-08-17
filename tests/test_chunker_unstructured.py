@@ -7,9 +7,9 @@ import pytest
 
 from pdfkb.chunker.chunker_unstructured import ChunkerUnstructured
 from pdfkb.config import ServerConfig
+from pdfkb.document_processor import DocumentProcessor as PDFProcessor
 from pdfkb.exceptions import PDFProcessingError
 from pdfkb.models import Chunk
-from pdfkb.pdf_processor import PDFProcessor
 
 
 class TestChunkerUnstructured:
@@ -268,7 +268,7 @@ class TestPDFProcessorWithUnstructuredChunker:
     @pytest.fixture
     def config(self):
         """Create a test configuration with unstructured chunker."""
-        return ServerConfig(openai_api_key="sk-test-key", pdf_chunker="unstructured")
+        return ServerConfig(openai_api_key="sk-test-key", document_chunker="unstructured")
 
     @pytest.fixture
     def embedding_service(self):
@@ -288,7 +288,7 @@ class TestPDFProcessorWithUnstructuredChunker:
     def test_pdf_processor_chunker_selection_fallback(self, config, embedding_service):
         """Test PDFProcessor fallback when Unstructured chunker is not available."""
         # Configure to use unstructured chunker
-        config.pdf_chunker = "unstructured"
+        config.document_chunker = "unstructured"
 
         # Mock ImportError for unstructured
         with patch("pdfkb.chunker.chunker_unstructured.ChunkerUnstructured.__init__") as mock_init:
@@ -307,10 +307,12 @@ class TestPDFProcessorWithUnstructuredChunker:
             pdf_file = tmp_path / "test.pdf"
             pdf_file.write_bytes(b"%PDF-1.4\ntest content")
 
-            # Mock the parser and chunker
-            mock_parse_result = Mock()
-            mock_parse_result.markdown_content = "# Test\n\nThis is test content."
-            mock_parse_result.metadata = {"page_count": 1}
+            # Mock the parser and chunker with page-aware format
+            from pdfkb.parsers.parser import PageContent, ParseResult
+
+            mock_page = PageContent(page_number=1, markdown_content="# Test\n\nThis is test content.", metadata={})
+
+            mock_parse_result = ParseResult(pages=[mock_page], metadata={"page_count": 1})
 
             # Use proper async mock for parse method
             processor.parser.parse = AsyncMock(return_value=mock_parse_result)
@@ -347,16 +349,16 @@ class TestConfigChanges:
     """Test cases for configuration changes affecting chunker selection."""
 
     def test_config_pdf_chunker_unstructured(self):
-        """Test configuration with pdf_chunker set to 'unstructured'."""
-        config = ServerConfig(openai_api_key="sk-test-key", pdf_chunker="unstructured")
-        assert config.pdf_chunker == "unstructured"
+        """Test configuration with document_chunker set to 'unstructured'."""
+        config = ServerConfig(openai_api_key="sk-test-key", document_chunker="unstructured")
+        assert config.document_chunker == "unstructured"
 
     def test_config_pdf_chunker_langchain(self):
-        """Test configuration with pdf_chunker set to 'langchain'."""
-        config = ServerConfig(openai_api_key="sk-test-key", pdf_chunker="langchain")
-        assert config.pdf_chunker == "langchain"
+        """Test configuration with document_chunker set to 'langchain'."""
+        config = ServerConfig(openai_api_key="sk-test-key", document_chunker="langchain")
+        assert config.document_chunker == "langchain"
 
     def test_config_invalid_chunker(self):
         """Test configuration with invalid chunker raises error."""
         with pytest.raises(Exception):  # ConfigurationError or validation error
-            ServerConfig(openai_api_key="sk-test-key", pdf_chunker="invalid_chunker")
+            ServerConfig(openai_api_key="sk-test-key", document_chunker="invalid_chunker")

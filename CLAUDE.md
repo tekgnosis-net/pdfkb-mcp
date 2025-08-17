@@ -93,3 +93,5 @@ Optional parsers require additional installations:
 - **Change chunking**: Modify chunker classes in `src/pdfkb/chunker/`
 
 - Use Mermaid Charts for any diagrams
+
+- When writing commit messages, let's not include references to anthropic or claude. Let's also keep it in a concise format using the convention of prefixing "chore: ", "bugfix: ", "feat: ", etc, as appropriate.

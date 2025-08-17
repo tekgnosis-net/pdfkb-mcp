@@ -6,6 +6,10 @@ A Model Context Protocol server for managing PDF documents with vector search ca
 __version__ = "0.4.3"
 
 from .config import ServerConfig
+
+# Core components
+from .document_processor import DocumentProcessor  # Backward compatibility
+from .document_processor import DocumentProcessor as PDFProcessor
 from .embeddings import EmbeddingService
 
 # Exceptions
@@ -28,9 +32,6 @@ from .main import PDFKnowledgebaseServer
 
 # Data models
 from .models import Chunk, Document, ProcessingResult, SearchQuery, SearchResult
-
-# Core components
-from .pdf_processor import PDFProcessor
 from .vector_store import VectorStore
 
 # Web server integration
@@ -53,7 +54,8 @@ __all__ = [
     "SearchQuery",
     "ProcessingResult",
     # Core components
-    "PDFProcessor",
+    "DocumentProcessor",
+    "PDFProcessor",  # Backward compatibility
     "VectorStore",
     "EmbeddingService",
     "FileMonitor",

@@ -271,6 +271,7 @@ logs/
 # Local Dev
 .kilocode/mcp.json
 .mcp.json
+.mcp.json.disabled
 docs/proposals/
 docs/specs/
 

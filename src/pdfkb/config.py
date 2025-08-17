@@ -1,4 +1,4 @@
-"""Configuration management for the PDF Knowledgebase server."""
+"""Configuration management for the Document Knowledgebase server (PDF and Markdown support)."""
 
 import logging
 import os
@@ -15,13 +15,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ServerConfig:
-    """Runtime configuration for the PDF Knowledgebase server."""
+    """Runtime configuration for the Document Knowledgebase server."""
 
     # Required settings
     openai_api_key: str
 
     # Optional settings with defaults
-    knowledgebase_path: Path = field(default_factory=lambda: Path("./pdfs"))
+    knowledgebase_path: Path = field(default_factory=lambda: Path("./documents"))
     cache_dir: Path = field(default_factory=lambda: Path(""))
     chunk_size: int = 1000
     chunk_overlap: int = 200
@@ -44,10 +44,15 @@ class ServerConfig:
     vector_search_k: int = 5
     file_scan_interval: int = 60
     log_level: str = "INFO"
-    supported_extensions: List[str] = field(default_factory=lambda: [".pdf"])
+    supported_extensions: List[str] = field(default_factory=lambda: [".pdf", ".md", ".markdown"])
     unstructured_pdf_processing_strategy: str = "fast"
-    pdf_parser: str = "pymupdf4llm"
-    pdf_chunker: str = "langchain"
+
+    # Markdown-specific configuration
+    markdown_parse_frontmatter: bool = True  # Parse YAML/TOML frontmatter
+    markdown_extract_title: bool = True  # Extract title from first H1
+    pdf_parser: str = "pymupdf4llm"  # For PDFs only, markdown files bypass parsing
+    document_chunker: str = "langchain"  # Used for both PDFs and Markdown
+    pdf_chunker: str = "langchain"  # Backward compatibility alias
     docling_config: Dict[str, Any] = field(default_factory=dict)
     # Marker LLM configuration
     marker_use_llm: bool = False
@@ -84,6 +89,15 @@ class ServerConfig:
     semantic_chunker_min_chunk_size: Optional[int] = None
     semantic_chunker_min_chunk_chars: Optional[int] = 100
 
+    # Page chunking configuration
+    page_chunker_min_chunk_size: Optional[int] = 100
+    page_chunker_max_chunk_size: Optional[int] = None
+    page_chunker_merge_small: bool = True
+
+    # Markdown page boundary configuration
+    markdown_page_boundary_pattern: str = r"--\[PAGE:\s*(\d+)\]--"  # Default page pattern for markdown
+    markdown_split_on_page_boundaries: bool = True
+
     # Parallel processing configuration
     max_parallel_parsing: int = 1  # Max number of PDFs to parse simultaneously (default: 1 to prevent overload)
     max_parallel_embedding: int = 1  # Max number of documents to embed simultaneously (default: 1 to prevent overload)
@@ -95,6 +109,12 @@ class ServerConfig:
         # Set cache_dir relative to knowledgebase_path if not explicitly provided
         if not self.cache_dir or self.cache_dir == Path(""):
             self.cache_dir = self.knowledgebase_path / ".cache"
+
+        # Backward compatibility: sync pdf_chunker with document_chunker
+        if hasattr(self, "pdf_chunker") and not hasattr(self, "document_chunker"):
+            self.document_chunker = self.pdf_chunker
+        elif hasattr(self, "document_chunker"):
+            self.pdf_chunker = self.document_chunker
 
         # Set whoosh_index_dir if not explicitly provided
         if not self.whoosh_index_dir:
@@ -162,8 +182,23 @@ class ServerConfig:
                 "pdf_parser must be either 'unstructured', 'pymupdf4llm', 'mineru', 'marker', 'docling', or 'llm'"
             )
 
-        if self.pdf_chunker not in ["langchain", "unstructured", "semantic"]:
-            raise ConfigurationError("pdf_chunker must be 'langchain', 'unstructured', or 'semantic'")
+        if self.pdf_chunker not in ["langchain", "unstructured", "semantic", "page"]:
+            raise ConfigurationError("pdf_chunker must be 'langchain', 'unstructured', 'semantic', or 'page'")
+
+        # Validate page chunking configuration if using page chunker
+        if self.pdf_chunker == "page":
+            if self.page_chunker_min_chunk_size and self.page_chunker_min_chunk_size <= 0:
+                raise ConfigurationError("page_chunker_min_chunk_size must be positive")
+
+            if self.page_chunker_max_chunk_size and self.page_chunker_max_chunk_size <= 0:
+                raise ConfigurationError("page_chunker_max_chunk_size must be positive")
+
+            if (
+                self.page_chunker_min_chunk_size
+                and self.page_chunker_max_chunk_size
+                and self.page_chunker_min_chunk_size >= self.page_chunker_max_chunk_size
+            ):
+                raise ConfigurationError("page_chunker_min_chunk_size must be less than max_chunk_size")
 
         # Validate semantic chunking configuration if using semantic chunker
         if self.pdf_chunker == "semantic":
@@ -573,17 +608,56 @@ class ServerConfig:
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_MINERU_VRAM: {mineru_vram}")
 
-        # Parse PDF chunker selection
-        pdf_chunker = os.getenv("PDFKB_PDF_CHUNKER") or os.getenv("PDF_CHUNKER")
-        if os.getenv("PDF_CHUNKER") and not os.getenv("PDFKB_PDF_CHUNKER"):
-            logger.warning("PDF_CHUNKER is deprecated, use PDFKB_PDF_CHUNKER instead")
-        if pdf_chunker:
-            chunker = pdf_chunker.lower()
-            if chunker not in ["langchain", "unstructured", "semantic"]:
+        # Parse document chunker selection (supports both new and old env vars)
+        document_chunker = (
+            os.getenv("PDFKB_DOCUMENT_CHUNKER") or os.getenv("PDFKB_PDF_CHUNKER") or os.getenv("PDF_CHUNKER")
+        )
+        if os.getenv("PDF_CHUNKER") and not os.getenv("PDFKB_PDF_CHUNKER") and not os.getenv("PDFKB_DOCUMENT_CHUNKER"):
+            logger.warning("PDF_CHUNKER is deprecated, use PDFKB_DOCUMENT_CHUNKER or PDFKB_PDF_CHUNKER instead")
+        if document_chunker:
+            chunker = document_chunker.lower()
+            if chunker not in ["langchain", "unstructured", "semantic", "page"]:
                 raise ConfigurationError(
-                    f"Invalid PDFKB_PDF_CHUNKER: {pdf_chunker}. Must be 'langchain', 'unstructured', or 'semantic'"
+                    f"Invalid PDFKB_DOCUMENT_CHUNKER/PDFKB_PDF_CHUNKER: {document_chunker}. "
+                    "Must be 'langchain', 'unstructured', 'semantic', or 'page'"
                 )
-            config_kwargs["pdf_chunker"] = chunker
+            config_kwargs["document_chunker"] = chunker
+            config_kwargs["pdf_chunker"] = chunker  # Backward compatibility
+
+        # Parse page chunking configuration
+        if page_min_size := os.getenv("PDFKB_PAGE_CHUNKER_MIN_CHUNK_SIZE"):
+            try:
+                config_kwargs["page_chunker_min_chunk_size"] = int(page_min_size) if page_min_size else None
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_PAGE_CHUNKER_MIN_CHUNK_SIZE: {page_min_size}")
+
+        if page_max_size := os.getenv("PDFKB_PAGE_CHUNKER_MAX_CHUNK_SIZE"):
+            try:
+                config_kwargs["page_chunker_max_chunk_size"] = int(page_max_size) if page_max_size else None
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_PAGE_CHUNKER_MAX_CHUNK_SIZE: {page_max_size}")
+
+        if page_merge := os.getenv("PDFKB_PAGE_CHUNKER_MERGE_SMALL"):
+            config_kwargs["page_chunker_merge_small"] = page_merge.lower() == "true"
+
+        # Parse markdown configuration
+        if os.getenv("PDFKB_MARKDOWN_PARSE_FRONTMATTER"):
+            config_kwargs["markdown_parse_frontmatter"] = (
+                os.getenv("PDFKB_MARKDOWN_PARSE_FRONTMATTER", "true").lower() == "true"
+            )
+
+        if os.getenv("PDFKB_MARKDOWN_EXTRACT_TITLE"):
+            config_kwargs["markdown_extract_title"] = (
+                os.getenv("PDFKB_MARKDOWN_EXTRACT_TITLE", "true").lower() == "true"
+            )
+
+        if markdown_page_pattern := os.getenv("PDFKB_MARKDOWN_PAGE_BOUNDARY_PATTERN"):
+            config_kwargs["markdown_page_boundary_pattern"] = markdown_page_pattern
+
+        if os.getenv("PDFKB_MARKDOWN_SPLIT_ON_PAGE_BOUNDARIES"):
+            config_kwargs["markdown_split_on_page_boundaries"] = (
+                os.getenv("PDFKB_MARKDOWN_SPLIT_ON_PAGE_BOUNDARIES", "true").lower() == "true"
+            )
 
         # Parse semantic chunking configuration
         if semantic_threshold_type := os.getenv("PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE"):

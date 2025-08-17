@@ -30,15 +30,15 @@ class ConfigurationError(PDFKnowledgebaseError):
     pass
 
 
-class PDFProcessingError(PDFKnowledgebaseError):
-    """Errors during PDF processing."""
+class DocumentProcessingError(PDFKnowledgebaseError):
+    """Errors during document processing (PDF, Markdown, etc.)."""
 
     def __init__(self, message: str, file_path: Optional[str] = None, cause: Optional[Exception] = None):
-        """Initialize PDF processing error.
+        """Initialize document processing error.
 
         Args:
             message: Error message.
-            file_path: Optional path to the PDF file that caused the error.
+            file_path: Optional path to the document file that caused the error.
             cause: Optional underlying exception.
         """
         super().__init__(message, cause)
@@ -50,6 +50,10 @@ class PDFProcessingError(PDFKnowledgebaseError):
         if self.file_path:
             return f"{base_msg} (file: {self.file_path})"
         return base_msg
+
+
+# Backward compatibility alias
+PDFProcessingError = DocumentProcessingError
 
 
 class EmbeddingError(PDFKnowledgebaseError):

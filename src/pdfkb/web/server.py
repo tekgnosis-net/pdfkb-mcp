@@ -12,9 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from ..background_queue import BackgroundProcessingQueue
 from ..config import ServerConfig
+from ..document_processor import DocumentProcessor
 from ..embeddings import EmbeddingService
 from ..models import Document
-from ..pdf_processor import PDFProcessor
 from ..vector_store import VectorStore
 from .models.web_models import (
     AddDocumentByPathRequest,
@@ -47,7 +47,7 @@ class PDFKnowledgebaseWebServer:
     def __init__(
         self,
         config: ServerConfig,
-        pdf_processor: PDFProcessor,
+        document_processor: DocumentProcessor,
         vector_store: VectorStore,
         embedding_service: EmbeddingService,
         document_cache: Dict[str, Document],
@@ -58,7 +58,7 @@ class PDFKnowledgebaseWebServer:
 
         Args:
             config: Server configuration
-            pdf_processor: PDF processing service
+            document_processor: Document processing service
             vector_store: Vector storage service
             embedding_service: Embedding generation service
             document_cache: Document metadata cache
@@ -66,7 +66,7 @@ class PDFKnowledgebaseWebServer:
             background_queue: Optional background processing queue
         """
         self.config = config
-        self.pdf_processor = pdf_processor
+        self.document_processor = document_processor
         self.vector_store = vector_store
         self.embedding_service = embedding_service
         self.document_cache = document_cache
@@ -79,7 +79,12 @@ class PDFKnowledgebaseWebServer:
 
         # Initialize services with queue and websocket manager
         self.document_service = WebDocumentService(
-            pdf_processor, vector_store, document_cache, save_cache_callback, background_queue, self.websocket_manager
+            document_processor,
+            vector_store,
+            document_cache,
+            save_cache_callback,
+            background_queue,
+            self.websocket_manager,
         )
         self.search_service = WebSearchService(vector_store, embedding_service, document_cache)
         self.status_service = WebStatusService(config, vector_store, document_cache, self.start_time)

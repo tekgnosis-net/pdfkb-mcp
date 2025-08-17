@@ -7,12 +7,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .parser import ParseResult, PDFParser
+from .parser import DocumentParser, PageContent, ParseResult
 
 logger = logging.getLogger(__name__)
 
 
-class MinerUPDFParser(PDFParser):
+class MinerUPDFParser(DocumentParser):
     """PDF parser using MinerU CLI tool."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, cache_dir: Optional[Path] = None):
@@ -72,7 +72,10 @@ class MinerUPDFParser(PDFParser):
                     markdown_content = self._load_from_cache(cache_path)
                     metadata = self._load_metadata_from_cache(cache_path)
                     if markdown_content is not None:
-                        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                        # Create page-aware result
+                        # TODO: Implement proper page extraction for this parser
+                        pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+                        return ParseResult(pages=pages, metadata=metadata)
 
             logger.debug(f"Parsing PDF with MinerU CLI: {file_path}")
 
@@ -97,7 +100,10 @@ class MinerUPDFParser(PDFParser):
                     self._save_metadata_to_cache(cache_path, metadata)
 
                 logger.debug("Successfully extracted content from PDF using MinerU")
-                return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                # Create page-aware result
+                # TODO: Implement proper page extraction for this parser
+                pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+                return ParseResult(pages=pages, metadata=metadata)
 
         except Exception as e:
             raise RuntimeError(f"Failed to parse PDF with MinerU: {e}") from e

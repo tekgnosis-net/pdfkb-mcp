@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .parser import ParseResult, PDFParser
+from .parser import DocumentParser, PageContent, ParseResult
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ OCR_ENGINE_DEPENDENCIES = {
 }
 
 
-class DoclingParser(PDFParser):
+class DoclingParser(DocumentParser):
     """PDF parser using the Docling library for advanced document processing."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, cache_dir: Path = None):
@@ -89,7 +89,16 @@ class DoclingParser(PDFParser):
                     markdown_content = self._load_from_cache(cache_path)
                     metadata = self._load_metadata_from_cache(cache_path)
                     if markdown_content is not None and metadata:
-                        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                        # Create page-aware result
+                        # Since Docling doesn't provide per-page markdown, create single page
+                        pages = [
+                            PageContent(
+                                page_number=1,
+                                markdown_content=markdown_content,
+                                metadata={"from_cache": True, "total_pages": metadata.get("page_count", 1)},
+                            )
+                        ]
+                        return ParseResult(pages=pages, metadata=metadata)
 
             # Validate input file for security
             self._validate_input_file(file_path)
@@ -152,7 +161,19 @@ class DoclingParser(PDFParser):
             logger.debug(f"OCR enabled: {self.available_features['ocr']}")
             logger.debug(f"Tables extracted: {metadata.get('table_count', 0)}")
 
-            return ParseResult(markdown_content=markdown_content, metadata=metadata)
+            # Create page-aware result
+            # Since Docling export_to_markdown() returns combined markdown,
+            # we'll create a single page with all content for now
+            # TODO: In future, could parse conversion_result.document.pages individually
+            pages = [
+                PageContent(
+                    page_number=1,
+                    markdown_content=markdown_content,
+                    metadata={"total_pages": metadata.get("page_count", 1)},
+                )
+            ]
+
+            return ParseResult(pages=pages, metadata=metadata)
 
         except ImportError:
             # Re-raise ImportError as-is for parser fallback logic

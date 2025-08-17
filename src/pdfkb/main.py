@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from fastmcp import FastMCP
 
 from .config import ServerConfig
+from .document_processor import DocumentProcessor
 from .embeddings import EmbeddingService
 from .exceptions import (
     ConfigurationError,
@@ -22,7 +23,6 @@ from .exceptions import (
 from .file_monitor import FileMonitor
 from .intelligent_cache import IntelligentCacheManager
 from .models import Document, SearchQuery
-from .pdf_processor import PDFProcessor
 from .vector_store import VectorStore
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ class PDFKnowledgebaseServer:
         """
         self.config = config or ServerConfig.from_env()
         self.app = FastMCP("PDF Knowledgebase")
-        self.pdf_processor: Optional[PDFProcessor] = None
+        self.document_processor: Optional[DocumentProcessor] = None
         self.vector_store: Optional[VectorStore] = None
         self.embedding_service: Optional[EmbeddingService] = None
         self.file_monitor: Optional[FileMonitor] = None
@@ -83,17 +83,21 @@ class PDFKnowledgebaseServer:
             self.vector_store.set_embedding_service(self.embedding_service)
             await self.vector_store.initialize()
 
-            self.pdf_processor = PDFProcessor(
+            self.document_processor = DocumentProcessor(
                 self.config, self.embedding_service, self.cache_manager, self._embedding_semaphore
             )
 
             # Log startup configuration summary for diagnostics
             try:
                 parser_name = (
-                    type(self.pdf_processor.parser).__name__ if self.pdf_processor else str(self.config.pdf_parser)
+                    type(self.document_processor.parser).__name__
+                    if self.document_processor
+                    else str(self.config.pdf_parser)
                 )
                 chunker_name = (
-                    type(self.pdf_processor.chunker).__name__ if self.pdf_processor else str(self.config.pdf_chunker)
+                    type(self.document_processor.chunker).__name__
+                    if self.document_processor
+                    else str(self.config.document_chunker)
                 )
             except Exception:
                 parser_name = str(self.config.pdf_parser)
@@ -135,7 +139,7 @@ class PDFKnowledgebaseServer:
 
             self.file_monitor = FileMonitor(
                 self.config,
-                self.pdf_processor,
+                self.document_processor,
                 self.vector_store,
                 self._update_document_cache,
                 background_queue=self.background_queue,
@@ -275,7 +279,7 @@ class PDFKnowledgebaseServer:
             logger.info("Re-processing existing cached documents with new configuration...")
 
             # Re-process cached markdown files (skips expensive parsing)
-            documents = await self.pdf_processor.reprocess_cached_documents()
+            documents = await self.document_processor.reprocess_cached_documents()
 
             if documents:
                 # Add all documents to vector store
@@ -345,15 +349,15 @@ class PDFKnowledgebaseServer:
 
         @self.app.tool()
         async def add_document(path: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-            """Add a PDF document to the knowledgebase for searching and analysis.
+            """Add a document (PDF or Markdown) to the knowledgebase for searching and analysis.
 
-            Use this tool to ingest new PDF documents. Once added, the document content
-            will be automatically processed, chunked, and made searchable via search_documents.
-            You do not need to call any other tools after adding - the document becomes
-            immediately available for searching.
+            Use this tool to ingest new documents. Supports both PDF and Markdown (.md, .markdown) files.
+            Once added, the document content will be automatically processed, chunked, and made searchable
+            via search_documents. You do not need to call any other tools after adding - the document
+            becomes immediately available for searching.
 
             Args:
-                path: Path to the PDF file to add to the knowledgebase.
+                path: Path to the document file (PDF or Markdown) to add to the knowledgebase.
                 metadata: Optional metadata to associate with the document (e.g., tags, categories).
 
             Returns:
@@ -368,15 +372,18 @@ class PDFKnowledgebaseServer:
                 if not file_path.exists():
                     raise ValidationError(f"File does not exist: {path}", "path")
 
-                if not file_path.suffix.lower() == ".pdf":
-                    raise ValidationError(f"File is not a PDF: {path}", "path")
+                supported_extensions = [".pdf", ".md", ".markdown"]
+                if not file_path.suffix.lower() in supported_extensions:
+                    raise ValidationError(
+                        f"File type not supported. Must be one of {supported_extensions}: {path}", "path"
+                    )
 
                 logger.info(f"Adding document: {path}")
                 start_time = time.time()
 
                 # Process the PDF with semaphore to limit parallelism
                 async with self._parsing_semaphore:
-                    result = await self.pdf_processor.process_pdf(file_path, metadata)
+                    result = await self.document_processor.process_document(file_path, metadata)
 
                 if not result.success:
                     logger.error(f"Failed to process PDF {path}: {result.error}")
@@ -725,7 +732,7 @@ class PDFKnowledgebaseServer:
 
         @self.app.resource("pdf://{document_id}")
         async def get_document(document_id: str) -> str:
-            """Get a PDF document by ID.
+            """Get a document (PDF or Markdown) by ID.
 
             Args:
                 document_id: ID of the document to retrieve.
@@ -752,7 +759,7 @@ class PDFKnowledgebaseServer:
 
         @self.app.resource("pdf://{document_id}/page/{page_number}")
         async def get_document_page(document_id: str, page_number: int) -> str:
-            """Get a specific page of a PDF document.
+            """Get a specific page of a document (PDF only, not applicable to Markdown).
 
             Args:
                 document_id: ID of the document.
@@ -788,7 +795,7 @@ class PDFKnowledgebaseServer:
 
         @self.app.resource("pdf://list")
         async def list_all_documents() -> str:
-            """List all available PDF documents.
+            """List all available documents (PDFs and Markdown files).
 
             Returns:
                 JSON string with document list and metadata.
@@ -850,7 +857,7 @@ class PDFKnowledgebaseServer:
                     logger.info(f"Auto-processing {change_type} PDF: {file_path}")
 
                     # Process the PDF
-                    result = await self.pdf_processor.process_pdf(file_path)
+                    result = await self.document_processor.process_document(file_path)
 
                     if result.success and result.document:
                         # Update vector store

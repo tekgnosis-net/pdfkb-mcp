@@ -16,12 +16,12 @@ try:
 except ImportError:
     JINJA2_AVAILABLE = False
 
-from .parser import ParseResult, PDFParser
+from .parser import DocumentParser, PageContent, ParseResult
 
 logger = logging.getLogger(__name__)
 
 
-class LLMParser(PDFParser):
+class LLMParser(DocumentParser):
     """PDF parser using OpenRouter LLM integration for image-to-text transcription."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, cache_dir: Path = None):
@@ -183,7 +183,10 @@ If you cannot determine a clear title or summary, return "TITLE: " or "SUMMARY: 
                     markdown_content = self._load_from_cache(cache_path)
                     metadata = self._load_metadata_from_cache(cache_path)
                     if markdown_content is not None and metadata:
-                        return ParseResult(markdown_content=markdown_content, metadata=metadata)
+                        # Create page-aware result
+                        # TODO: Implement proper page extraction for this parser
+                        pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+                        return ParseResult(pages=pages, metadata=metadata)
 
             logger.debug(f"Parsing PDF with LLM: {file_path}")
             start_time = time.time()
@@ -227,7 +230,10 @@ If you cannot determine a clear title or summary, return "TITLE: " or "SUMMARY: 
                 self._save_metadata_to_cache(cache_path, metadata)
 
             logger.debug(f"Successfully parsed PDF with LLM in {processing_time:.2f} seconds")
-            return ParseResult(markdown_content=markdown_content, metadata=metadata)
+            # Create page-aware result
+            # TODO: Implement proper page extraction for this parser
+            pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
+            return ParseResult(pages=pages, metadata=metadata)
 
         except Exception as e:
             logger.error(f"Failed to parse PDF with LLM: {e}")

@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from pdfkb.config import ServerConfig
+from pdfkb.document_processor import DocumentProcessor as PDFProcessor
 from pdfkb.embeddings import EmbeddingService
-from pdfkb.pdf_processor import PDFProcessor
 
 reportlab = pytest.importorskip("reportlab", reason="reportlab is required for smoke test")
 from reportlab.pdfgen import canvas  # noqa: E402

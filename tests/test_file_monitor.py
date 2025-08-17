@@ -39,13 +39,13 @@ class TestFileMonitor:
     @pytest.fixture
     def file_monitor(self, config, callback_mock):
         """Create a FileMonitor instance with proper constructor signature and patched watchdog."""
-        # FileMonitor now expects: (config, pdf_processor, vector_store, document_cache_callback)
+        # FileMonitor now expects: (config, document_processor, vector_store, document_cache_callback)
         # We don't need watchdog for these tests; patch Observer within FileMonitor to a no-op.
         # Patch the watchdog Observer at its import site inside FileMonitor._start_watchdog
         with patch("watchdog.observers.Observer"):
-            pdf_processor = Mock()
+            document_processor = Mock()
             vector_store = Mock()
-            return FileMonitor(config, pdf_processor, vector_store, callback_mock)
+            return FileMonitor(config, document_processor, vector_store, callback_mock)
 
     @pytest.mark.asyncio
     async def test_initialize_file_monitor(self, file_monitor):

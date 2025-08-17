@@ -129,7 +129,7 @@ class IntegratedPDFKnowledgebaseServer:
             # Background queue was already initialized - create web server using MCP server components
             self.web_server = PDFKnowledgebaseWebServer(
                 config=self.config,
-                pdf_processor=self.mcp_server.pdf_processor,
+                document_processor=self.mcp_server.document_processor,
                 vector_store=self.mcp_server.vector_store,
                 embedding_service=self.mcp_server.embedding_service,
                 document_cache=self.mcp_server._document_cache,

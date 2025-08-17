@@ -337,7 +337,7 @@ class TestServerConfigurationChangeHandling:
                     set_embedding_service=Mock(),
                 )
             ),
-            PDFProcessor=Mock(),
+            DocumentProcessor=Mock(),
             FileMonitor=Mock(return_value=Mock(start_monitoring=AsyncMock())),
         ):
             server._load_document_cache = AsyncMock()

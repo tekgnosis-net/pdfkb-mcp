@@ -1,4 +1,4 @@
-"""Abstract base class for PDF parsers."""
+"""Abstract base class for document parsers (PDF, Markdown, etc.)."""
 
 import hashlib
 import json
@@ -6,21 +6,51 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ParseResult:
-    """Result of parsing a PDF document."""
+class PageContent:
+    """Content and metadata for a single page."""
 
+    page_number: int
     markdown_content: str
     metadata: Dict[str, Any]
 
 
-class PDFParser(ABC):
-    """Abstract base class for PDF parsers."""
+@dataclass
+class ParseResult:
+    """Result of parsing a document with page-aware content."""
+
+    pages: List[PageContent]
+    metadata: Dict[str, Any]
+
+    def get_combined_markdown(self) -> str:
+        """Get combined markdown content from all pages.
+
+        Returns:
+            Combined markdown content with page headers.
+        """
+        if not self.pages:
+            return ""
+
+        combined_parts = []
+        for page in self.pages:
+            # Add page header
+            combined_parts.append(f"# Page {page.page_number}\n")
+            combined_parts.append(page.markdown_content)
+
+        return "\n\n".join(combined_parts)
+
+
+class DocumentParser(ABC):
+    """Abstract base class for document parsers.
+
+    Supports parsing various document formats (PDF, Markdown, etc.) into
+    a common markdown representation for downstream processing.
+    """
 
     def __init__(self, cache_dir: Optional[Path] = None):
         """Initialize the parser with optional cache directory.
@@ -34,10 +64,10 @@ class PDFParser(ABC):
 
     @abstractmethod
     async def parse(self, file_path: Path) -> ParseResult:
-        """Parse a PDF file and extract text and metadata.
+        """Parse a document file and extract text and metadata.
 
         Args:
-            file_path: Path to the PDF file.
+            file_path: Path to the document file.
 
         Returns:
             ParseResult with markdown content and metadata.
@@ -48,7 +78,7 @@ class PDFParser(ABC):
         """Get the cache path for a parsed markdown file.
 
         Args:
-            file_path: Path to the PDF file.
+            file_path: Path to the document file.
 
         Returns:
             Path to the cached markdown file.
@@ -64,7 +94,7 @@ class PDFParser(ABC):
         """Check if the cached file is valid (newer than the source file).
 
         Args:
-            file_path: Path to the source PDF file.
+            file_path: Path to the source document file.
             cache_path: Path to the cached markdown file.
 
         Returns:
@@ -141,3 +171,7 @@ class PDFParser(ABC):
         except Exception as e:
             logger.warning(f"Failed to load metadata from cache {metadata_path}: {e}")
             return {}
+
+
+# Backward compatibility alias
+PDFParser = DocumentParser

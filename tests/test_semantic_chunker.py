@@ -263,9 +263,9 @@ class TestServerConfigSemanticChunking:
 
     def test_config_semantic_chunker_defaults(self):
         """Test config with semantic chunker and default parameters."""
-        config = ServerConfig(openai_api_key="sk-test", pdf_chunker="semantic")
+        config = ServerConfig(openai_api_key="sk-test", document_chunker="semantic")
 
-        assert config.pdf_chunker == "semantic"
+        assert config.document_chunker == "semantic"
         assert config.semantic_chunker_threshold_type == "percentile"
         assert config.semantic_chunker_threshold_amount == 95.0
         assert config.semantic_chunker_buffer_size == 1
@@ -278,7 +278,7 @@ class TestServerConfigSemanticChunking:
         """Test config with semantic chunker and custom parameters."""
         config = ServerConfig(
             openai_api_key="sk-test",
-            pdf_chunker="semantic",
+            document_chunker="semantic",
             semantic_chunker_threshold_type="gradient",
             semantic_chunker_threshold_amount=90.0,
             semantic_chunker_buffer_size=3,
@@ -293,7 +293,9 @@ class TestServerConfigSemanticChunking:
     def test_config_invalid_threshold_type(self):
         """Test config validation for invalid threshold type."""
         with pytest.raises(Exception) as exc_info:
-            ServerConfig(openai_api_key="sk-test", pdf_chunker="semantic", semantic_chunker_threshold_type="invalid")
+            ServerConfig(
+                openai_api_key="sk-test", document_chunker="semantic", semantic_chunker_threshold_type="invalid"
+            )
 
         assert "semantic_chunker_threshold_type" in str(exc_info.value)
 
@@ -302,7 +304,7 @@ class TestServerConfigSemanticChunking:
         with pytest.raises(Exception) as exc_info:
             ServerConfig(
                 openai_api_key="sk-test",
-                pdf_chunker="semantic",
+                document_chunker="semantic",
                 semantic_chunker_threshold_type="percentile",
                 semantic_chunker_threshold_amount=150.0,  # > 100
             )
@@ -314,7 +316,7 @@ class TestServerConfigSemanticChunking:
         with pytest.raises(Exception) as exc_info:
             ServerConfig(
                 openai_api_key="sk-test",
-                pdf_chunker="semantic",
+                document_chunker="semantic",
                 semantic_chunker_threshold_type="standard_deviation",
                 semantic_chunker_threshold_amount=-1.0,  # negative
             )
@@ -324,13 +326,13 @@ class TestServerConfigSemanticChunking:
     def test_config_invalid_buffer_size(self):
         """Test config validation for invalid buffer size."""
         with pytest.raises(Exception) as exc_info:
-            ServerConfig(openai_api_key="sk-test", pdf_chunker="semantic", semantic_chunker_buffer_size=-1)
+            ServerConfig(openai_api_key="sk-test", document_chunker="semantic", semantic_chunker_buffer_size=-1)
 
         assert "cannot be negative" in str(exc_info.value)
 
     def test_config_invalid_min_chunk_chars(self):
         """Test config validation for invalid min_chunk_chars."""
         with pytest.raises(Exception) as exc_info:
-            ServerConfig(openai_api_key="sk-test", pdf_chunker="semantic", semantic_chunker_min_chunk_chars=0)
+            ServerConfig(openai_api_key="sk-test", document_chunker="semantic", semantic_chunker_min_chunk_chars=0)
 
         assert "must be positive" in str(exc_info.value)

@@ -196,7 +196,9 @@ class TestDoclingParserParsing:
 
             # Verify result
             assert isinstance(result, ParseResult)
-            assert result.markdown_content == "# Test Document\n\nTest content"
+            # Check page-aware format
+            assert len(result.pages) == 1
+            assert result.pages[0].markdown_content == "# Test Document\n\nTest content"
             assert result.metadata["processor_version"] == "docling"
             # With mocked doc and minimal pages list in newer API, page_count may be 1
             assert result.metadata["page_count"] in (1, 2)
@@ -361,7 +363,8 @@ class TestDoclingParserCacheIntegration:
             # First parse - should call converter
             result1 = await parser.parse(temp_pdf_file)
             assert mock_converter.convert.call_count == 1
-            assert result1.markdown_content == "# Cached Content"
+            assert len(result1.pages) == 1
+            assert result1.pages[0].markdown_content == "# Cached Content"
 
             # Second parse - should use cache (simulate by checking cache files)
             cache_path = parser._get_cache_path(temp_pdf_file)
@@ -560,10 +563,12 @@ class TestDoclingParserIntegration:
 
             # Verify basic result structure
             assert isinstance(result, ParseResult)
-            assert len(result.markdown_content) > 0
+            assert len(result.pages) > 0
+            assert len(result.pages[0].markdown_content) > 0
             assert result.metadata["processor_version"] == "docling"
             assert result.metadata["page_count"] >= 1
-            assert "Test Document" in result.markdown_content or "test document" in result.markdown_content.lower()
+            combined_content = result.get_combined_markdown()
+            assert "Test Document" in combined_content or "test document" in combined_content.lower()
 
         finally:
             # Cleanup

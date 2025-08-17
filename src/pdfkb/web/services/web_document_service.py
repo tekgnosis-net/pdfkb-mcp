@@ -1,4 +1,4 @@
-"""Web document service that wraps PDFProcessor functionality."""
+"""Web document service that wraps DocumentProcessor functionality."""
 
 import logging
 import time
@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ...background_queue import BackgroundProcessingQueue, Job, JobStatus, JobType, Priority
+from ...document_processor import DocumentProcessor
 from ...models import Document
-from ...pdf_processor import PDFProcessor
 from ...vector_store import VectorStore
 from ..models.web_models import (
     ChunkResponse,
@@ -32,7 +32,7 @@ class WebDocumentService:
 
     def __init__(
         self,
-        pdf_processor: PDFProcessor,
+        document_processor: DocumentProcessor,
         vector_store: VectorStore,
         document_cache: Dict[str, Document],
         save_cache_callback: Optional[callable] = None,
@@ -42,14 +42,14 @@ class WebDocumentService:
         """Initialize the web document service.
 
         Args:
-            pdf_processor: PDF processing service
+            document_processor: PDF processing service
             vector_store: Vector storage service
             document_cache: Document metadata cache
             save_cache_callback: Optional callback to save document cache
             background_queue: Optional background processing queue
             websocket_manager: Optional WebSocket manager for real-time updates
         """
-        self.pdf_processor = pdf_processor
+        self.document_processor = document_processor
         self.vector_store = vector_store
         self.document_cache = document_cache
         self.save_cache_callback = save_cache_callback
@@ -71,7 +71,7 @@ class WebDocumentService:
         Returns:
             Path to the uploads directory inside the knowledgebase.
         """
-        uploads_dir = self.pdf_processor.config.knowledgebase_path / "uploads"
+        uploads_dir = self.document_processor.config.knowledgebase_path / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
         return uploads_dir
 
@@ -719,7 +719,7 @@ class WebDocumentService:
                 return False
 
             doc_path = Path(document.path).resolve()
-            kb_path = self.pdf_processor.config.knowledgebase_path.resolve()
+            kb_path = self.document_processor.config.knowledgebase_path.resolve()
             uploads_path = (kb_path / "uploads").resolve()
 
             # Check if document is within knowledgebase directory
@@ -945,7 +945,7 @@ class WebDocumentService:
                 await self.websocket_manager.broadcast_processing_started(filename, job.job_id)
 
             # Process the document
-            result = await self.pdf_processor.process_pdf(temp_path, original_metadata)
+            result = await self.document_processor.process_document(temp_path, original_metadata)
 
             if result.success and result.document:
                 # Clean document metadata before storing
@@ -1036,7 +1036,7 @@ class WebDocumentService:
                 raise FileNotFoundError(f"File not found: {file_path}")
 
             # Process the document
-            result = await self.pdf_processor.process_pdf(path, original_metadata)
+            result = await self.document_processor.process_document(path, original_metadata)
 
             if result.success and result.document:
                 # Clean document metadata before storing
@@ -1132,7 +1132,7 @@ class WebDocumentService:
 
             try:
                 # Process the document
-                result = await self.pdf_processor.process_pdf(temp_path, metadata)
+                result = await self.document_processor.process_document(temp_path, metadata)
                 processing_time = time.time() - start_time
 
                 if not result.success:
@@ -1196,7 +1196,7 @@ class WebDocumentService:
                 )
 
             # Process the document
-            result = await self.pdf_processor.process_pdf(path, metadata)
+            result = await self.document_processor.process_document(path, metadata)
             processing_time = time.time() - start_time
 
             if not result.success:
