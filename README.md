@@ -3,6 +3,11 @@
 A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local, OpenAI, or HuggingFace embeddings and ChromaDB vector storage.
 
 **🆕 NEW Features:**
+- **HuggingFace Inference Embeddings**: Use HuggingFace Inference API with support for custom providers like Nebius
+- **Custom OpenAI Endpoints**: Support for OpenAI-compatible APIs with custom base URLs
+- **Minimum Chunk Filtering**: Automatically filter out short, low-information chunks below configurable character threshold
+- **Markdown Document Support**: Native support for .md files with frontmatter parsing and page boundary detection
+- **Page-Based Chunking**: Preserve document structure with intelligent page-level chunk boundaries
 - **Semantic Chunking**: Advanced content-aware chunking using embedding similarity for better context preservation
 - **Local Embeddings**: Run embeddings locally with HuggingFace models - no API costs, full privacy
 - **Hybrid Search**: Combines semantic similarity with keyword matching (BM25) for superior search quality
@@ -15,6 +20,7 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [🤖 Local Embeddings](#-local-embeddings)
 - [🔍 Hybrid Search](#-hybrid-search)
+- [🔽 Minimum Chunk Filtering](#-minimum-chunk-filtering)
 - [🧩 Semantic Chunking](#-semantic-chunking)
 - [🎯 Parser Selection Guide](#-parser-selection-guide)
 - [⚙️ Configuration](#️-configuration)
@@ -55,6 +61,50 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
       "env": {
         "PDFKB_EMBEDDING_PROVIDER": "openai",
         "PDFKB_OPENAI_API_KEY": "sk-proj-abc123def456ghi789...",
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**🆕 Option C: HuggingFace w/ Custom Provider**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_EMBEDDING_PROVIDER": "huggingface",
+        "PDFKB_HUGGINGFACE_EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2",
+        "PDFKB_HUGGINGFACE_PROVIDER": "nebius",
+        "HF_TOKEN": "hf_your_token_here",
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**🆕 Option D: Custom OpenAI-Compatible API**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_EMBEDDING_PROVIDER": "openai",
+        "PDFKB_OPENAI_API_KEY": "your-api-key",
+        "PDFKB_OPENAI_API_BASE": "https://api.studio.nebius.com/v1/",
+        "PDFKB_EMBEDDING_MODEL": "text-embedding-3-large",
         "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
         "PDFKB_ENABLE_HYBRID_SEARCH": "true"
       },
@@ -358,15 +408,15 @@ PDFKB_FALLBACK_TO_OPENAI=false  # Use OpenAI if local fails
 
 ### 2. OpenAI Embeddings
 
-Use OpenAI's embedding API for high-quality embeddings with minimal setup.
+Use OpenAI's embedding API or **any OpenAI-compatible endpoint** for high-quality embeddings with minimal setup.
 
 **Features:**
 - **High Quality**: State-of-the-art embedding models
 - **No Local Resources**: Runs entirely in the cloud
 - **Fast**: Optimized API with batching support
+- **🆕 Custom Endpoints**: Support for OpenAI-compatible APIs like Together, Nebius, etc.
 
-To use OpenAI embeddings:
-
+**Standard OpenAI:**
 ```json
 {
   "env": {
@@ -377,14 +427,27 @@ To use OpenAI embeddings:
 }
 ```
 
+**🆕 Custom OpenAI-Compatible Endpoints:**
+```json
+{
+  "env": {
+    "PDFKB_EMBEDDING_PROVIDER": "openai",
+    "PDFKB_OPENAI_API_KEY": "your-api-key",
+    "PDFKB_OPENAI_API_BASE": "https://api.studio.nebius.com/v1/",
+    "PDFKB_EMBEDDING_MODEL": "text-embedding-3-large"
+  }
+}
+```
+
 ### 3. HuggingFace Embeddings
 
-Use HuggingFace's Inference API or third-party providers for embeddings.
+**🆕 ENHANCED**: Use HuggingFace's Inference API with support for custom providers and thousands of embedding models.
 
 **Features:**
-- **Flexible Providers**: Use HuggingFace directly or providers like Nebius
+- **🆕 Multiple Providers**: Use HuggingFace directly or third-party providers like Nebius
 - **Wide Model Selection**: Access to thousands of embedding models
 - **Cost-Effective**: Many free or low-cost options available
+- **🆕 Provider Support**: Seamlessly switch between HuggingFace and custom inference providers
 
 **Configuration:**
 
@@ -505,6 +568,56 @@ pip install "pdfkb-mcp[hybrid]"
 ```
 
 Or if using uvx, it's included by default when hybrid search is enabled.
+
+## 🔽 Minimum Chunk Filtering
+
+**NEW**: The server now supports **Minimum Chunk Filtering**, which automatically filters out short, low-information chunks that don't contain enough content to be useful for search and retrieval.
+
+### How It Works
+
+Documents are processed normally through parsing and chunking, then chunks below the configured character threshold are automatically filtered out before indexing and embedding.
+
+### Benefits
+
+- **Improved Search Quality**: Eliminates noise from short, uninformative chunks
+- **Reduced Storage**: Less vector storage and faster search by removing low-value content
+- **Better Context**: Search results focus on chunks with substantial, meaningful content
+- **Configurable**: Set custom thresholds based on your document types and use case
+
+### Configuration
+
+```bash
+# Enable filtering (default: 0 = disabled)
+PDFKB_MIN_CHUNK_SIZE=150  # Filter chunks smaller than 150 characters
+
+# Examples for different use cases:
+PDFKB_MIN_CHUNK_SIZE=100  # Permissive - keep most content
+PDFKB_MIN_CHUNK_SIZE=200  # Stricter - only substantial chunks
+PDFKB_MIN_CHUNK_SIZE=0    # Disabled - keep all chunks (default)
+```
+
+Or in your MCP client configuration:
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_OPENAI_API_KEY": "sk-proj-...",
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/pdfs",
+        "PDFKB_MIN_CHUNK_SIZE": "150"
+      }
+    }
+  }
+}
+```
+
+### Usage Guidelines
+
+- **Default (0)**: No filtering - keeps all chunks for maximum recall
+- **Conservative (100-150)**: Good balance - removes very short chunks while preserving content
+- **Aggressive (200+)**: Strict filtering - only keeps substantial chunks with rich content
 
 ## 🧩 Semantic Chunking
 
@@ -845,6 +958,10 @@ Document Type & Priority?
 | `PDFKB_WEB_HOST` | `localhost` | Web server host |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
 | `PDFKB_EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI embedding model (use `text-embedding-3-small` for faster processing) |
+| `PDFKB_MIN_CHUNK_SIZE` | `0` | Minimum chunk size in characters (0 = disabled, filters out chunks smaller than this size) |
+| `PDFKB_OPENAI_API_BASE` | *optional* | Custom base URL for OpenAI-compatible APIs (e.g., https://api.studio.nebius.com/v1/) |
+| `PDFKB_HUGGINGFACE_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace model for embeddings when using huggingface provider |
+| `PDFKB_HUGGINGFACE_PROVIDER` | *optional* | HuggingFace provider (e.g., "nebius"), leave empty for default |
 | `PDFKB_ENABLE_HYBRID_SEARCH` | `true` | Enable hybrid search combining semantic and keyword matching |
 | `PDFKB_HYBRID_VECTOR_WEIGHT` | `0.6` | Weight for semantic search (0-1, must sum to 1 with text weight) |
 | `PDFKB_HYBRID_TEXT_WEIGHT` | `0.4` | Weight for keyword/BM25 search (0-1, must sum to 1 with vector weight) |
@@ -1234,7 +1351,11 @@ pip install -e ".[dev]"
 | `PDFKB_PDF_CHUNKER` | `langchain` | Chunking strategy: `langchain`, `unstructured`, `semantic` |
 | `PDFKB_CHUNK_SIZE` | `1000` | LangChain chunk size |
 | `PDFKB_CHUNK_OVERLAP` | `200` | LangChain chunk overlap |
+| `PDFKB_MIN_CHUNK_SIZE` | `0` | Minimum chunk size in characters (0 = disabled, filters out chunks smaller than this size) |
 | `PDFKB_EMBEDDING_MODEL` | `text-embedding-3-large` | OpenAI model |
+| `PDFKB_OPENAI_API_BASE` | *optional* | Custom base URL for OpenAI-compatible APIs |
+| `PDFKB_HUGGINGFACE_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace model |
+| `PDFKB_HUGGINGFACE_PROVIDER` | *optional* | HuggingFace provider (e.g., "nebius") |
 | `PDFKB_EMBEDDING_BATCH_SIZE` | `100` | Embedding batch size |
 | `PDFKB_MAX_PARALLEL_PARSING` | `1` | Max concurrent PDF parsing operations |
 | `PDFKB_MAX_PARALLEL_EMBEDDING` | `1` | Max concurrent embedding operations |
