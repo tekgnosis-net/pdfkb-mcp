@@ -143,7 +143,8 @@ class TestSemanticChunker:
         assert chunker.buffer_size == 1
         assert chunker.number_of_chunks is None
         assert chunker.sentence_split_regex == r"(?<=[.?!])\s+"
-        assert chunker.min_chunk_size is None
+        assert chunker.min_chunk_size == 0  # Global filtering, defaults to 0 (disabled)
+        assert chunker.langchain_min_chunk_size is None  # LangChain-specific parameter
         assert chunker.min_chunk_chars is None
 
     def test_chunker_initialization_custom(self):

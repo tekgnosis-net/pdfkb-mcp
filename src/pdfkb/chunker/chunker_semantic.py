@@ -29,6 +29,8 @@ class SemanticChunker(Chunker):
         sentence_split_regex: str = r"(?<=[.?!])\s+",
         min_chunk_size: Optional[int] = None,
         min_chunk_chars: Optional[int] = None,
+        cache_dir: str = None,
+        global_min_chunk_size: int = 0,
     ):
         """Initialize semantic chunker with configurable parameters.
 
@@ -45,15 +47,17 @@ class SemanticChunker(Chunker):
             sentence_split_regex: Regex pattern for sentence splitting.
             min_chunk_size: Minimum chunk size in tokens (deprecated, use min_chunk_chars).
             min_chunk_chars: Minimum chunk size in characters.
+            cache_dir: Optional cache directory.
+            global_min_chunk_size: Global minimum chunk size (filters out small chunks).
         """
-        super().__init__()
+        super().__init__(cache_dir=cache_dir, min_chunk_size=global_min_chunk_size)
         self.embedding_service = embedding_service
         self.breakpoint_threshold_type = breakpoint_threshold_type
         self.breakpoint_threshold_amount = breakpoint_threshold_amount
         self.buffer_size = buffer_size
         self.number_of_chunks = number_of_chunks
         self.sentence_split_regex = sentence_split_regex
-        self.min_chunk_size = min_chunk_size
+        self.langchain_min_chunk_size = min_chunk_size  # LangChain-specific parameter
         self.min_chunk_chars = min_chunk_chars
 
         # Create LangChain-compatible embeddings wrapper
@@ -84,8 +88,8 @@ class SemanticChunker(Chunker):
             # Add optional parameters if specified
             if self.number_of_chunks is not None:
                 kwargs["number_of_chunks"] = self.number_of_chunks
-            if self.min_chunk_size is not None:
-                kwargs["min_chunk_size"] = self.min_chunk_size
+            if self.langchain_min_chunk_size is not None:
+                kwargs["min_chunk_size"] = self.langchain_min_chunk_size
 
             self._splitter = LangChainSemanticChunker(**kwargs)
 
@@ -143,6 +147,9 @@ class SemanticChunker(Chunker):
 
                 chunk = Chunk(text=chunk_text, chunk_index=i, metadata=chunk_metadata)
                 chunks.append(chunk)
+
+            # Apply minimum chunk size filtering
+            chunks = self._filter_small_chunks(chunks)
 
             logger.info(
                 f"Created {len(chunks)} chunks using semantic chunking "

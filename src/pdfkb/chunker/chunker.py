@@ -24,13 +24,15 @@ class ChunkResult:
 class Chunker(ABC):
     """Abstract base class for text chunkers."""
 
-    def __init__(self, cache_dir: str = None):
-        """Initialize the chunker with optional cache directory.
+    def __init__(self, cache_dir: str = None, min_chunk_size: int = 0):
+        """Initialize the chunker with optional cache directory and minimum chunk size.
 
         Args:
             cache_dir: Directory to cache chunked results.
+            min_chunk_size: Minimum size for chunks (0 = disabled).
         """
         self.cache_dir = cache_dir
+        self.min_chunk_size = min_chunk_size
 
     @abstractmethod
     def chunk(self, markdown_content: str, metadata: Dict[str, Any]) -> List[Chunk]:
@@ -78,4 +80,34 @@ class Chunker(ABC):
             if page_match:
                 chunk.metadata["page_number"] = int(page_match.group(1))
 
+        # Apply minimum chunk size filtering
+        chunks = self._filter_small_chunks(chunks)
+
         return chunks
+
+    def _filter_small_chunks(self, chunks: List[Chunk]) -> List[Chunk]:
+        """Filter out chunks smaller than min_chunk_size.
+
+        Args:
+            chunks: List of chunks to filter.
+
+        Returns:
+            List of chunks that meet the minimum size requirement.
+        """
+        if self.min_chunk_size <= 0:
+            return chunks
+
+        filtered_chunks = []
+        filtered_count = 0
+
+        for chunk in chunks:
+            chunk_text = chunk.text.strip()
+            if len(chunk_text) >= self.min_chunk_size:
+                filtered_chunks.append(chunk)
+            else:
+                filtered_count += 1
+
+        if filtered_count > 0:
+            logger.info(f"Filtered out {filtered_count} chunks smaller than {self.min_chunk_size} characters")
+
+        return filtered_chunks

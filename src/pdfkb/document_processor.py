@@ -255,6 +255,8 @@ class DocumentProcessor:
                 min_chunk_size=self.config.page_chunker_min_chunk_size,
                 max_chunk_size=self.config.page_chunker_max_chunk_size,
                 merge_small=self.config.page_chunker_merge_small,
+                global_min_chunk_size=self.config.min_chunk_size,
+                cache_dir=str(self.config.cache_dir) if self.config.cache_dir else None,
             )
         elif chunker_type == "semantic":
             try:
@@ -269,6 +271,8 @@ class DocumentProcessor:
                     sentence_split_regex=self.config.semantic_chunker_sentence_split_regex,
                     min_chunk_size=self.config.semantic_chunker_min_chunk_size,
                     min_chunk_chars=self.config.semantic_chunker_min_chunk_chars,
+                    cache_dir=str(self.config.cache_dir) if self.config.cache_dir else None,
+                    global_min_chunk_size=self.config.min_chunk_size,
                 )
             except ImportError as e:
                 logger.warning(
@@ -280,7 +284,10 @@ class DocumentProcessor:
             return self._create_langchain_chunker()
         elif chunker_type == "unstructured":
             try:
-                return ChunkerUnstructured()
+                return ChunkerUnstructured(
+                    cache_dir=str(self.config.cache_dir) if self.config.cache_dir else None,
+                    min_chunk_size=self.config.min_chunk_size,
+                )
             except ImportError as e:
                 # If unstructured was explicitly requested but not available, raise error
                 raise PDFProcessingError(
@@ -299,7 +306,12 @@ class DocumentProcessor:
             Chunker instance.
         """
         try:
-            return LangChainChunker(chunk_size=self.config.chunk_size, chunk_overlap=self.config.chunk_overlap)
+            return LangChainChunker(
+                chunk_size=self.config.chunk_size,
+                chunk_overlap=self.config.chunk_overlap,
+                cache_dir=str(self.config.cache_dir) if self.config.cache_dir else None,
+                min_chunk_size=self.config.min_chunk_size,
+            )
         except ImportError as e:
             logger.warning(
                 f"LangChain chunker not available ({e}). Falling back to Unstructured chunker. "
@@ -307,7 +319,10 @@ class DocumentProcessor:
             )
             # Fallback to Unstructured if available
             try:
-                return ChunkerUnstructured()
+                return ChunkerUnstructured(
+                    cache_dir=str(self.config.cache_dir) if self.config.cache_dir else None,
+                    min_chunk_size=self.config.min_chunk_size,
+                )
             except ImportError:
                 raise PDFProcessingError(
                     "No chunker available. Install one of: "

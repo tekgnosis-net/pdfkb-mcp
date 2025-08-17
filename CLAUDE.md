@@ -76,8 +76,12 @@ Version is managed by `bump2version` - never manually change version numbers. On
 
 Essential environment variables:
 - `PDFKB_OPENAI_API_KEY`: Required only for OpenAI embeddings (local embeddings are default)
+- `PDFKB_OPENAI_API_BASE`: Custom base URL for OpenAI-compatible endpoints (e.g., `https://api.studio.nebius.com/v1/`)
+- `HF_TOKEN`: Required for HuggingFace embeddings (get from https://huggingface.co/settings/tokens)
 - `PDFKB_KNOWLEDGEBASE_PATH`: PDF directory path
 - `PDFKB_WEB_ENABLE`: Web interface control (default: `false`)
+- `PDFKB_EMBEDDING_PROVIDER`: Choose between "local", "openai", or "huggingface" (default: "local")
+- `PDFKB_MIN_CHUNK_SIZE`: Minimum chunk size in characters (default: `0` = disabled, filters out chunks smaller than this size)
 
 Optional parsers require additional installations:
 - `pip install "pdfkb-mcp[marker]"` for Marker parser

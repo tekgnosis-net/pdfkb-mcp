@@ -4,6 +4,7 @@ import logging
 
 from .config import ServerConfig
 from .embeddings_base import EmbeddingService
+from .embeddings_huggingface import HuggingFaceEmbeddingService
 from .embeddings_local import LocalEmbeddingService
 from .embeddings_openai import OpenAIEmbeddingService
 from .exceptions import ConfigurationError
@@ -41,6 +42,10 @@ def create_embedding_service(config: ServerConfig, fallback: bool = True) -> Emb
     elif provider == "openai":
         logger.info("Creating OpenAI embedding service")
         return OpenAIEmbeddingService(config)
+
+    elif provider == "huggingface":
+        logger.info("Creating HuggingFace embedding service")
+        return HuggingFaceEmbeddingService(config)
 
     else:
         raise ConfigurationError(f"Unknown embedding provider: {provider}")

@@ -18,6 +18,8 @@ class LangChainChunker(Chunker):
         headers_to_split_on: Optional[List[Tuple[str, str]]] = None,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
+        cache_dir: str = None,
+        min_chunk_size: int = 0,
     ):
         """Initialize the LangChain chunker.
 
@@ -25,8 +27,10 @@ class LangChainChunker(Chunker):
             headers_to_split_on: List of (header_tag, header_name) tuples.
             chunk_size: Maximum size of each chunk.
             chunk_overlap: Overlap between chunks.
+            cache_dir: Optional cache directory.
+            min_chunk_size: Minimum size for chunks (0 = disabled).
         """
-        super().__init__()
+        super().__init__(cache_dir=cache_dir, min_chunk_size=min_chunk_size)
         self.headers_to_split_on = headers_to_split_on or [
             ("#", "Header 1"),
             ("##", "Header 2"),
@@ -112,6 +116,9 @@ class LangChainChunker(Chunker):
                 chunk = Chunk(text=chunk_text, chunk_index=i, metadata=chunk_metadata)
                 chunks.append(chunk)
 
+            # Apply minimum chunk size filtering
+            chunks = self._filter_small_chunks(chunks)
+
             logger.info(f"Created {len(chunks)} chunks using LangChain MarkdownHeaderTextSplitter")
             return chunks
 
@@ -149,6 +156,9 @@ class LangChainChunker(Chunker):
 
                 chunk = Chunk(text=chunk_text.strip(), chunk_index=i, metadata=chunk_metadata)
                 chunks.append(chunk)
+
+            # Apply minimum chunk size filtering
+            chunks = self._filter_small_chunks(chunks)
 
             logger.info(f"Created {len(chunks)} chunks using fallback method")
             return chunks

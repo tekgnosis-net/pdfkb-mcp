@@ -1,6 +1,6 @@
 # PDF Knowledgebase MCP Server
 
-A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local or OpenAI embeddings and ChromaDB vector storage.
+A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local, OpenAI, or HuggingFace embeddings and ChromaDB vector storage.
 
 **🆕 NEW Features:**
 - **Semantic Chunking**: Advanced content-aware chunking using embedding similarity for better context preservation
@@ -272,19 +272,20 @@ graph LR
 - `pdf://{document_id}/page/{page_number}` - Specific page content
 - `pdf://list` - List of all documents with metadata
 
-## 🤖 Local Embeddings
+## 🤖 Embedding Options
 
-The server now supports **local embeddings** as the default option, eliminating API costs and keeping your data completely private. Local embeddings run on your machine using HuggingFace models optimized for performance.
+The server supports three embedding providers, each with different trade-offs:
 
-### Features
+### 1. Local Embeddings (Default)
 
-- **Zero API Costs**: No OpenAI API charges for embeddings
-- **Complete Privacy**: Your documents never leave your machine
-- **Hardware Acceleration**: Automatic detection and use of Metal (macOS), CUDA (NVIDIA), or CPU
+Run embeddings locally using HuggingFace models, eliminating API costs and keeping your data completely private.
+
+**Features:**
+- **Zero API Costs**: No external API charges
+- **Complete Privacy**: Documents never leave your machine
+- **Hardware Acceleration**: Automatic detection of Metal (macOS), CUDA (NVIDIA), or CPU
 - **Smart Caching**: LRU cache for frequently embedded texts
 - **Multiple Model Sizes**: Choose based on your hardware capabilities
-
-### Quick Start
 
 Local embeddings are **enabled by default**. No configuration needed for basic usage:
 
@@ -355,9 +356,16 @@ PDFKB_MAX_SEQUENCE_LENGTH=512        # Maximum text length
 PDFKB_FALLBACK_TO_OPENAI=false  # Use OpenAI if local fails
 ```
 
-### Switching to OpenAI
+### 2. OpenAI Embeddings
 
-If you prefer OpenAI embeddings:
+Use OpenAI's embedding API for high-quality embeddings with minimal setup.
+
+**Features:**
+- **High Quality**: State-of-the-art embedding models
+- **No Local Resources**: Runs entirely in the cloud
+- **Fast**: Optimized API with batching support
+
+To use OpenAI embeddings:
 
 ```json
 {
@@ -367,6 +375,44 @@ If you prefer OpenAI embeddings:
     "PDFKB_EMBEDDING_MODEL": "text-embedding-3-large"
   }
 }
+```
+
+### 3. HuggingFace Embeddings
+
+Use HuggingFace's Inference API or third-party providers for embeddings.
+
+**Features:**
+- **Flexible Providers**: Use HuggingFace directly or providers like Nebius
+- **Wide Model Selection**: Access to thousands of embedding models
+- **Cost-Effective**: Many free or low-cost options available
+
+**Configuration:**
+
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "pdfkb-mcp",
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/your/pdfs",
+        "PDFKB_EMBEDDING_PROVIDER": "huggingface",
+        "PDFKB_HUGGINGFACE_EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2",
+        "HF_TOKEN": "hf_your_token_here"
+      }
+    }
+  }
+}
+```
+
+**Advanced Configuration:**
+
+```bash
+# Use a specific provider like Nebius
+PDFKB_HUGGINGFACE_PROVIDER=nebius
+PDFKB_HUGGINGFACE_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
+
+# Or use HuggingFace directly (auto/default)
+PDFKB_HUGGINGFACE_PROVIDER=  # Leave empty for auto
 ```
 
 ### Performance Tips

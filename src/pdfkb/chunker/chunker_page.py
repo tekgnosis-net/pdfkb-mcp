@@ -21,6 +21,8 @@ class PageChunker(Chunker):
         min_chunk_size: Optional[int] = None,
         max_chunk_size: Optional[int] = None,
         merge_small: bool = True,
+        global_min_chunk_size: int = 0,
+        cache_dir: str = None,
     ):
         """Initialize the page chunker.
 
@@ -28,8 +30,11 @@ class PageChunker(Chunker):
             min_chunk_size: Minimum size for a chunk. Small pages may be merged.
             max_chunk_size: Maximum size for a chunk. Large pages may be split.
             merge_small: Whether to merge small consecutive pages.
+            global_min_chunk_size: Global minimum chunk size (filters out unmergeable small chunks).
+            cache_dir: Optional cache directory.
         """
-        self.min_chunk_size = min_chunk_size
+        super().__init__(cache_dir=cache_dir, min_chunk_size=global_min_chunk_size)
+        self.page_min_chunk_size = min_chunk_size  # Rename to avoid confusion
         self.max_chunk_size = max_chunk_size
         self.merge_small = merge_small
 
@@ -46,7 +51,7 @@ class PageChunker(Chunker):
         Returns:
             Single chunk containing the entire text
         """
-        return [
+        chunks = [
             Chunk(
                 text=text,
                 metadata={
@@ -60,6 +65,9 @@ class PageChunker(Chunker):
                 document_id="",
             )
         ]
+
+        # Apply global minimum chunk size filtering
+        return self._filter_small_chunks(chunks)
 
     def chunk_pages(self, pages: List[PageContent], metadata: Optional[Dict[str, Any]] = None) -> List[Chunk]:
         """Chunk page-aware content by creating one chunk per page.
@@ -96,7 +104,7 @@ class PageChunker(Chunker):
 
             # Check if we should merge this page with the current chunk
             should_merge = False
-            if self.merge_small and self.min_chunk_size and current_chunk_text:
+            if self.merge_small and self.page_min_chunk_size and current_chunk_text:
                 current_size = len(current_chunk_text)
                 combined_size = current_size + page_size + 2  # +2 for "\n\n"
 
@@ -104,7 +112,7 @@ class PageChunker(Chunker):
                 # 1. Current chunk is below minimum size AND
                 # 2. The page itself is also small (below minimum) AND
                 # 3. Combined size won't exceed max (if set)
-                if current_size < self.min_chunk_size and page_size < self.min_chunk_size:
+                if current_size < self.page_min_chunk_size and page_size < self.page_min_chunk_size:
                     if not self.max_chunk_size or combined_size <= self.max_chunk_size:
                         should_merge = True
 
@@ -129,6 +137,9 @@ class PageChunker(Chunker):
         # Handle large chunks if max_chunk_size is set
         if self.max_chunk_size:
             chunks = self._split_large_chunks(chunks)
+
+        # Apply global minimum chunk size filtering
+        chunks = self._filter_small_chunks(chunks)
 
         # Update total chunks count
         total_chunks = len(chunks)

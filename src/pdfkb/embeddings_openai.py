@@ -35,7 +35,13 @@ class OpenAIEmbeddingService(EmbeddingService):
         try:
             import openai
 
-            self.client = openai.AsyncOpenAI(api_key=self.config.openai_api_key)
+            # Create client with optional custom base URL
+            client_kwargs = {"api_key": self.config.openai_api_key}
+            if self.config.openai_api_base:
+                client_kwargs["base_url"] = self.config.openai_api_base
+                logger.info(f"Using custom OpenAI API base URL: {self.config.openai_api_base}")
+
+            self.client = openai.AsyncOpenAI(**client_kwargs)
 
             logger.info(f"OpenAI embedding service initialized with model: {self.model}")
 

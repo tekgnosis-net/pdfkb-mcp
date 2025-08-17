@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 class ChunkerUnstructured(Chunker):
     """Chunker using the unstructured library for markdown text chunking."""
 
-    def __init__(self, cache_dir: str = None):
+    def __init__(self, cache_dir: str = None, min_chunk_size: int = 0):
         """Initialize the unstructured chunker with zero configuration.
 
         Args:
             cache_dir: Directory to cache chunked results (not used in this implementation).
+            min_chunk_size: Minimum size for chunks (0 = disabled).
         """
-        super().__init__(cache_dir)
+        super().__init__(cache_dir=cache_dir, min_chunk_size=min_chunk_size)
 
         try:
             import unstructured
@@ -78,6 +79,9 @@ class ChunkerUnstructured(Chunker):
 
                 chunk = Chunk(text=chunk_text, chunk_index=i, metadata=chunk_metadata)
                 chunks.append(chunk)
+
+            # Apply minimum chunk size filtering
+            chunks = self._filter_small_chunks(chunks)
 
             logger.info(f"Created {len(chunks)} chunks using unstructured library")
             return chunks

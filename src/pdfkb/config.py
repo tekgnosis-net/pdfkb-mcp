@@ -25,11 +25,15 @@ class ServerConfig:
     cache_dir: Path = field(default_factory=lambda: Path(""))
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    min_chunk_size: int = 0  # Global minimum chunk size (0 = disabled)
     embedding_model: str = "text-embedding-3-large"
     embedding_batch_size: int = 100
 
     # Embedding provider configuration
-    embedding_provider: str = "local"  # "local" or "openai"
+    embedding_provider: str = "local"  # "local", "openai", or "huggingface"
+
+    # OpenAI configuration
+    openai_api_base: Optional[str] = None  # Custom base URL for OpenAI-compatible endpoints
 
     # Local embedding configuration
     local_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"  # High quality 0.6B model
@@ -41,6 +45,11 @@ class ServerConfig:
     model_cache_dir: str = "~/.cache/pdfkb-mcp/models"
     embedding_dimension: int = 0  # 0 uses model default
     fallback_to_openai: bool = False
+
+    # HuggingFace embedding configuration
+    huggingface_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # Default lightweight model
+    huggingface_provider: Optional[str] = None  # Provider like "nebius", None for auto/default
+    huggingface_api_key: Optional[str] = None  # HF token, can also use HF_TOKEN env var
     vector_search_k: int = 5
     file_scan_interval: int = 60
     log_level: str = "INFO"
@@ -129,12 +138,22 @@ class ServerConfig:
         if self.embedding_provider == "openai":
             if not self.openai_api_key:
                 raise ConfigurationError("OPENAI_API_KEY is required when using OpenAI embeddings")
-            if not self.openai_api_key.startswith("sk-"):
-                raise ConfigurationError("Invalid OpenAI API key format")
+            # Only validate standard OpenAI key format if using the default endpoint
+            if not self.openai_api_base and not self.openai_api_key.startswith("sk-"):
+                raise ConfigurationError("Invalid OpenAI API key format (must start with 'sk-')")
         elif self.embedding_provider == "local":
             # For local embeddings, we can use a dummy key
             if not self.openai_api_key:
                 self.openai_api_key = "sk-local-embeddings-dummy-key"
+        elif self.embedding_provider == "huggingface":
+            # For HuggingFace embeddings, check for HF token
+            if not self.huggingface_api_key and not os.getenv("HF_TOKEN"):
+                raise ConfigurationError(
+                    "HF_TOKEN environment variable or huggingface_api_key is required when using HuggingFace embeddings"
+                )
+            # For OpenAI API key, use a dummy one if not provided
+            if not self.openai_api_key:
+                self.openai_api_key = "sk-huggingface-embeddings-dummy-key"
         else:
             raise ConfigurationError(f"Invalid embedding_provider: {self.embedding_provider}")
 
@@ -146,6 +165,9 @@ class ServerConfig:
 
         if self.chunk_overlap >= self.chunk_size:
             raise ConfigurationError("chunk_overlap must be less than chunk_size")
+
+        if self.min_chunk_size < 0:
+            raise ConfigurationError("min_chunk_size cannot be negative")
 
         if self.embedding_batch_size <= 0:
             raise ConfigurationError("embedding_batch_size must be positive")
@@ -318,6 +340,9 @@ class ServerConfig:
         if os.getenv("OPENAI_API_KEY") and not os.getenv("PDFKB_OPENAI_API_KEY"):
             logger.warning("OPENAI_API_KEY is deprecated, use PDFKB_OPENAI_API_KEY instead")
 
+        # Get OpenAI API base URL (for OpenAI-compatible endpoints)
+        openai_api_base = os.getenv("PDFKB_OPENAI_API_BASE")
+
         # Only require OpenAI key if using OpenAI embeddings
         if embedding_provider == "openai" and not openai_api_key:
             raise ConfigurationError(
@@ -333,6 +358,9 @@ class ServerConfig:
             "openai_api_key": openai_api_key,
             "embedding_provider": embedding_provider,
         }
+
+        if openai_api_base:
+            config_kwargs["openai_api_base"] = openai_api_base
 
         # Parse optional path settings
         knowledgebase_path = os.getenv("PDFKB_KNOWLEDGEBASE_PATH") or os.getenv("KNOWLEDGEBASE_PATH")
@@ -365,6 +393,13 @@ class ServerConfig:
                 config_kwargs["chunk_overlap"] = int(chunk_overlap)
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_CHUNK_OVERLAP: {chunk_overlap}")
+
+        min_chunk_size = os.getenv("PDFKB_MIN_CHUNK_SIZE")
+        if min_chunk_size:
+            try:
+                config_kwargs["min_chunk_size"] = int(min_chunk_size)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_MIN_CHUNK_SIZE: {min_chunk_size}")
 
         embedding_batch_size = os.getenv("PDFKB_EMBEDDING_BATCH_SIZE") or os.getenv("EMBEDDING_BATCH_SIZE")
         if os.getenv("EMBEDDING_BATCH_SIZE") and not os.getenv("PDFKB_EMBEDDING_BATCH_SIZE"):
@@ -424,6 +459,19 @@ class ServerConfig:
                 config_kwargs["embedding_cache_size"] = int(embedding_cache_size)
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_EMBEDDING_CACHE_SIZE: {embedding_cache_size}")
+
+        # Parse HuggingFace embedding configuration
+        huggingface_embedding_model = os.getenv("PDFKB_HUGGINGFACE_EMBEDDING_MODEL")
+        if huggingface_embedding_model:
+            config_kwargs["huggingface_embedding_model"] = huggingface_embedding_model
+
+        huggingface_provider = os.getenv("PDFKB_HUGGINGFACE_PROVIDER")
+        if huggingface_provider:
+            config_kwargs["huggingface_provider"] = huggingface_provider
+
+        huggingface_api_key = os.getenv("PDFKB_HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+        if huggingface_api_key:
+            config_kwargs["huggingface_api_key"] = huggingface_api_key
 
         max_sequence_length = os.getenv("PDFKB_MAX_SEQUENCE_LENGTH")
         if max_sequence_length:
