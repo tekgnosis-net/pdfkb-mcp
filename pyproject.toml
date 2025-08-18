@@ -72,6 +72,9 @@ dependencies = [
 
     # Hybrid search support (included by default)
     "whoosh>=2.7.4",
+
+    # HTTP client for DeepInfra API
+    "aiohttp>=3.9.0",
 ]
 
 [project.optional-dependencies]
