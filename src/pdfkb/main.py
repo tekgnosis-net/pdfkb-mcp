@@ -48,6 +48,7 @@ class PDFKnowledgebaseServer:
         self.document_processor: Optional[DocumentProcessor] = None
         self.vector_store: Optional[VectorStore] = None
         self.embedding_service: Optional[EmbeddingService] = None
+        self.reranker_service = None
         self.file_monitor: Optional[FileMonitor] = None
         self.cache_manager: Optional[IntelligentCacheManager] = None
         self.background_queue = background_queue
@@ -79,8 +80,23 @@ class PDFKnowledgebaseServer:
             self.embedding_service = EmbeddingService(self.config)
             await self.embedding_service.initialize()
 
+            # Initialize reranker service if enabled
+            if self.config.enable_reranker:
+                from .reranker_factory import get_reranker_service
+
+                try:
+                    self.reranker_service = get_reranker_service(self.config)
+                    if self.reranker_service:
+                        await self.reranker_service.initialize()
+                        logger.info("Reranker service initialized successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize reranker service: {e}")
+                    logger.warning("Continuing without reranker")
+                    self.reranker_service = None
+
             self.vector_store = VectorStore(self.config)
             self.vector_store.set_embedding_service(self.embedding_service)
+            self.vector_store.set_reranker_service(self.reranker_service)
             await self.vector_store.initialize()
 
             self.document_processor = DocumentProcessor(
@@ -102,11 +118,14 @@ class PDFKnowledgebaseServer:
             except Exception:
                 parser_name = str(self.config.pdf_parser)
                 chunker_name = str(self.config.pdf_chunker)
+            reranker_info = f"Enabled ({self.config.reranker_model})" if self.config.enable_reranker else "Disabled"
             logger.info(
-                "Startup configuration: Parser=%s, Chunker=%s, EmbeddingModel=%s, KnowledgebasePath=%s, CacheDir=%s",
+                "Startup configuration: Parser=%s, Chunker=%s, EmbeddingModel=%s, Reranker=%s, "
+                "KnowledgebasePath=%s, CacheDir=%s",
                 parser_name,
                 chunker_name,
                 self.config.embedding_model,
+                reranker_info,
                 self.config.knowledgebase_path,
                 self.config.cache_dir,
             )

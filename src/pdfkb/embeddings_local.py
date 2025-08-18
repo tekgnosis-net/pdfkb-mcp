@@ -70,35 +70,52 @@ class LocalEmbeddingService(EmbeddingService):
 
     # Supported models with their specifications
     MODEL_SPECS = {
+        # Standard Qwen3-Embedding models
         "Qwen/Qwen3-Embedding-0.6B": {
             "dimension": 1024,
             "max_sequence_length": 32000,
             "size_gb": 1.2,
             "description": "Lightweight, 32K context",
+            "gguf": False,
         },
         "Qwen/Qwen3-Embedding-4B": {
             "dimension": 2560,
             "max_sequence_length": 32000,
             "size_gb": 8.0,
             "description": "High quality, 32K context",
+            "gguf": False,
         },
-        "intfloat/multilingual-e5-large-instruct": {
-            "dimension": 1024,
-            "max_sequence_length": 512,
-            "size_gb": 0.8,
-            "description": "Multilingual, instruction-following",
+        "Qwen/Qwen3-Embedding-8B": {
+            "dimension": 3584,
+            "max_sequence_length": 32000,
+            "size_gb": 16.0,
+            "description": "Maximum quality, 32K context",
+            "gguf": False,
         },
-        "BAAI/bge-m3": {
+        # GGUF quantized variants
+        "Qwen/Qwen3-Embedding-0.6B-GGUF": {
             "dimension": 1024,
-            "max_sequence_length": 8192,
-            "size_gb": 2.0,
-            "description": "Multilingual, 8K context",
+            "max_sequence_length": 32000,
+            "size_gb": 0.6,
+            "description": "Quantized lightweight, 32K context",
+            "gguf": True,
+            "base_model": "Qwen3-Embedding-0.6B",
         },
-        "jinaai/jina-embeddings-v3": {
-            "dimension": 1024,
-            "max_sequence_length": 8192,
-            "size_gb": 1.3,
-            "description": "570M params, task-specific",
+        "Qwen/Qwen3-Embedding-4B-GGUF": {
+            "dimension": 2560,
+            "max_sequence_length": 32000,
+            "size_gb": 2.4,
+            "description": "Quantized high quality, 32K context",
+            "gguf": True,
+            "base_model": "Qwen3-Embedding-4B",
+        },
+        "Qwen/Qwen3-Embedding-8B-GGUF": {
+            "dimension": 3584,
+            "max_sequence_length": 32000,
+            "size_gb": 4.8,
+            "description": "Quantized maximum quality, 32K context",
+            "gguf": True,
+            "base_model": "Qwen3-Embedding-8B",
         },
     }
 
@@ -120,6 +137,22 @@ class LocalEmbeddingService(EmbeddingService):
         self._embedding_cache = LRUCache(maxsize=config.embedding_cache_size)
         self._model_cache_dir = Path(config.model_cache_dir).expanduser()
         self._initialized = False
+
+        # Check if this is a GGUF model
+        self.is_gguf = self.MODEL_SPECS.get(self.model_name, {}).get("gguf", False)
+
+    def _get_gguf_filename(self) -> str:
+        """Generate GGUF filename based on model and quantization.
+
+        Returns:
+            GGUF filename string.
+        """
+        if not self.is_gguf:
+            return None
+
+        base_model = self.MODEL_SPECS[self.model_name]["base_model"]
+        quantization = self.config.gguf_quantization
+        return f"{base_model}-{quantization}.gguf"
 
     async def initialize(self) -> None:
         """Initialize the model and tokenizer."""
@@ -144,7 +177,28 @@ class LocalEmbeddingService(EmbeddingService):
             model_path = self._get_model_cache_path()
 
             try:
-                if model_path.exists():
+                if self.is_gguf:
+                    # Load GGUF model with specific quantization
+                    gguf_filename = self._get_gguf_filename()
+                    logger.info(
+                        f"Loading GGUF model: {self.model_name} with quantization {self.config.gguf_quantization}"
+                    )
+                    logger.info(f"GGUF filename: {gguf_filename}")
+
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        self.model_name,
+                        cache_dir=str(self._model_cache_dir),
+                        trust_remote_code=True,
+                        gguf_file=gguf_filename,
+                    )
+                    self.model = AutoModel.from_pretrained(
+                        self.model_name,
+                        cache_dir=str(self._model_cache_dir),
+                        torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
+                        trust_remote_code=True,
+                        gguf_file=gguf_filename,
+                    )
+                elif model_path.exists():
                     logger.info(f"Loading model from cache: {model_path}")
                     self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
                     self.model = AutoModel.from_pretrained(

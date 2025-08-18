@@ -3,6 +3,9 @@
 A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local, OpenAI, or HuggingFace embeddings and ChromaDB vector storage.
 
 **🆕 NEW Features:**
+- **Reranking Support**: Advanced result reranking using Qwen3-Reranker models (standard and GGUF) for improved search relevance
+- **GGUF Quantized Models**: Memory-optimized local embeddings and rerankers with 50-70% smaller models using GGUF quantization
+- **Qwen3-Embedding Exclusive Support**: Optimized support for the advanced Qwen3-Embedding model family only
 - **HuggingFace Inference Embeddings**: Use HuggingFace Inference API with support for custom providers like Nebius
 - **Custom OpenAI Endpoints**: Support for OpenAI-compatible APIs with custom base URLs
 - **Minimum Chunk Filtering**: Automatically filter out short, low-information chunks below configurable character threshold
@@ -19,6 +22,7 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 - [🌐 Web Interface](#-web-interface)
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [🤖 Local Embeddings](#-local-embeddings)
+- [🔄 Reranking](#-reranking)
 - [🔍 Hybrid Search](#-hybrid-search)
 - [🔽 Minimum Chunk Filtering](#-minimum-chunk-filtering)
 - [🧩 Semantic Chunking](#-semantic-chunking)
@@ -43,6 +47,46 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
       "env": {
         "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
         "PDFKB_ENABLE_HYBRID_SEARCH": "true"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**🆕 Option A2: Local GGUF Embeddings (Memory Optimized, No API Key Required)**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_LOCAL_EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-0.6B-GGUF",
+        "PDFKB_GGUF_QUANTIZATION": "Q6_K",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**🆕 Option A3: Local Embeddings with Reranking (Best Search Quality, No API Key Required)**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true",
+        "PDFKB_ENABLE_RERANKER": "true",
+        "PDFKB_RERANKER_MODEL": "Qwen/Qwen3-Reranker-0.6B"
       },
       "transport": "stdio",
       "autoRestart": true
@@ -355,18 +399,54 @@ Local embeddings are **enabled by default**. No configuration needed for basic u
 
 ### Supported Models
 
+**🆕 Qwen3-Embedding Series Only**: The server now exclusively supports the Qwen3-Embedding model family, including both standard and quantized GGUF variants for optimized performance.
+
+#### Standard Models
+
 | Model | Size | Dimensions | Max Context | Best For |
 |-------|------|------------|-------------|----------|
 | **Qwen/Qwen3-Embedding-0.6B** (default) | 1.2GB | 1024 | 32K tokens | Best overall - long docs, fast |
-| **Qwen/Qwen3-Embedding-4B** | 8.0GB | 2560 | 32K tokens | Maximum quality, long context |
-| **intfloat/multilingual-e5-large-instruct** | 0.8GB | 1024 | 512 tokens | Multilingual, instruction-following |
-| **BAAI/bge-m3** | 2.0GB | 1024 | 8K tokens | Multilingual, balanced |
-| **jinaai/jina-embeddings-v3** | 1.3GB | 1024 | 8K tokens | Task-specific retrieval |
+| **Qwen/Qwen3-Embedding-4B** | 8.0GB | 2560 | 32K tokens | High quality, long context |
+| **Qwen/Qwen3-Embedding-8B** | 16.0GB | 3584 | 32K tokens | Maximum quality, long context |
+
+#### 🆕 GGUF Quantized Models (Reduced Memory Usage)
+
+| Model | Size | Dimensions | Max Context | Best For |
+|-------|------|------------|-------------|----------|
+| **Qwen/Qwen3-Embedding-0.6B-GGUF** | 0.6GB | 1024 | 32K tokens | Quantized lightweight, 32K context |
+| **Qwen/Qwen3-Embedding-4B-GGUF** | 2.4GB | 2560 | 32K tokens | Quantized high quality, 32K context |
+| **Qwen/Qwen3-Embedding-8B-GGUF** | 4.8GB | 3584 | 32K tokens | Quantized maximum quality, 32K context |
 
 Configure your preferred model:
 ```bash
+# Standard models
 PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"  # Default
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-4B"
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-8B"
+
+# GGUF quantized models (reduced memory usage)
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B-GGUF"
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-4B-GGUF"
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-8B-GGUF"
 ```
+
+#### 🆕 GGUF Quantization Options
+
+When using GGUF models, you can configure the quantization level to balance between model size and quality:
+
+```bash
+# Configure quantization (default: Q6_K)
+PDFKB_GGUF_QUANTIZATION="Q6_K"    # Default - balanced size/quality
+PDFKB_GGUF_QUANTIZATION="Q8_0"    # Higher quality, larger size
+PDFKB_GGUF_QUANTIZATION="F16"     # Highest quality, largest size
+PDFKB_GGUF_QUANTIZATION="Q4_K_M"  # Smaller size, lower quality
+```
+
+**Quantization Recommendations:**
+- **Q6_K** (default): Best balance of quality and size
+- **Q8_0**: Near-original quality with moderate compression
+- **F16**: Original quality, minimal compression
+- **Q4_K_M**: Maximum compression, acceptable quality loss
 
 ### Hardware Optimization
 
@@ -389,18 +469,29 @@ PDFKB_EMBEDDING_DEVICE="cpu"   # Force CPU
 # Embedding provider (local or openai)
 PDFKB_EMBEDDING_PROVIDER="local"  # Default
 
-# Model selection (choose from supported models)
+# Model selection (Qwen3-Embedding series only)
 PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"  # Default
-# Other options:
-# - "Qwen/Qwen3-Embedding-4B" (8GB, 2560 dims, best quality)
-# - "intfloat/multilingual-e5-large-instruct" (0.8GB, multilingual)
-# - "BAAI/bge-m3" (2GB, multilingual, 8K context)
-# - "jinaai/jina-embeddings-v3" (1.3GB, task-specific)
+# Standard options:
+# - "Qwen/Qwen3-Embedding-0.6B" (1.2GB, 1024 dims, default)
+# - "Qwen/Qwen3-Embedding-4B" (8GB, 2560 dims, high quality)
+# - "Qwen/Qwen3-Embedding-8B" (16GB, 3584 dims, maximum quality)
+# GGUF quantized options (reduced memory usage):
+# - "Qwen/Qwen3-Embedding-0.6B-GGUF" (0.6GB, 1024 dims)
+# - "Qwen/Qwen3-Embedding-4B-GGUF" (2.4GB, 2560 dims)
+# - "Qwen/Qwen3-Embedding-8B-GGUF" (4.8GB, 3584 dims)
+
+# GGUF quantization configuration (only used with GGUF models)
+PDFKB_GGUF_QUANTIZATION="Q6_K"  # Default quantization level
+# Available options: Q8_0, F16, Q6_K, Q4_K_M, Q4_K_S, Q5_K_M, Q5_K_S
 
 # Performance tuning
 PDFKB_LOCAL_EMBEDDING_BATCH_SIZE=32  # Adjust based on memory
 PDFKB_EMBEDDING_CACHE_SIZE=10000     # Number of cached embeddings
 PDFKB_MAX_SEQUENCE_LENGTH=512        # Maximum text length
+
+# Hardware acceleration
+PDFKB_EMBEDDING_DEVICE="auto"        # auto, mps, cuda, cpu
+PDFKB_USE_MODEL_OPTIMIZATION=true    # Enable torch.compile optimization
 
 # Fallback options
 PDFKB_FALLBACK_TO_OPENAI=false  # Use OpenAI if local fails
@@ -487,11 +578,19 @@ PDFKB_HUGGINGFACE_PROVIDER=  # Leave empty for auto
 
 2. **Model Selection**: Choose based on your needs
    - **Default (Qwen3-0.6B)**: Best for most users - 32K context, fast, 1.2GB
-   - **Long documents**: Use Qwen3-4B for 32K context with higher quality
-   - **Multilingual**: Use bge-m3 or multilingual-e5-large-instruct
-   - **Specific tasks**: Use jina-embeddings-v3 with task parameters
+   - **GGUF (Qwen3-0.6B-GGUF)**: Memory-optimized version - 32K context, fast, 0.6GB
+   - **High Quality (Qwen3-4B)**: Better accuracy - 32K context, 8GB
+   - **GGUF High Quality (Qwen3-4B-GGUF)**: Memory-optimized high quality - 32K context, 2.4GB
+   - **Maximum Quality (Qwen3-8B)**: Best accuracy - 32K context, 16GB
+   - **GGUF Maximum Quality (Qwen3-8B-GGUF)**: Memory-optimized maximum quality - 32K context, 4.8GB
 
-3. **Memory Management**: The server automatically handles OOM errors by reducing batch size
+3. **GGUF Quantization**: Choose based on memory constraints
+   - **Q6_K** (default): Best balance of quality and size
+   - **Q8_0**: Higher quality, larger size
+   - **F16**: Near-original quality, largest size
+   - **Q4_K_M**: Smallest size, acceptable quality
+
+4. **Memory Management**: The server automatically handles OOM errors by reducing batch size
 
 ## 📝 Markdown Document Support
 
@@ -532,6 +631,209 @@ PDFKB_MARKDOWN_SPLIT_ON_PAGE_BOUNDARIES=true  # Enable page boundary detection
 PDFKB_MARKDOWN_PARSE_FRONTMATTER=true  # Parse YAML/TOML frontmatter (default: true)
 PDFKB_MARKDOWN_EXTRACT_TITLE=true      # Extract title from first H1 (default: true)
 ```
+
+## 🔄 Reranking
+
+**🆕 NEW**: The server now supports **advanced reranking** using multiple providers to significantly improve search result relevance and quality. Reranking is a post-processing step that re-orders initial search results based on deeper semantic understanding.
+
+### Supported Providers
+
+1. **Local Models**: Qwen3-Reranker models (both standard and GGUF quantized variants)
+2. **DeepInfra API**: Qwen3-Reranker-8B via DeepInfra's native API
+
+### How It Works
+
+1. **Initial Search**: Retrieves `limit + reranker_sample_additional` candidates using hybrid/vector/text search
+2. **Reranking**: Uses Qwen3-Reranker to deeply analyze query-document relevance and re-score results
+3. **Final Results**: Returns the top `limit` results based on reranker scores
+
+### Supported Models
+
+#### Local Models (Qwen3-Reranker Series)
+
+**Standard Models**
+| Model | Size | Best For |
+|-------|------|----------|
+| **Qwen/Qwen3-Reranker-0.6B** (default) | 1.2GB | Lightweight, fast reranking |
+| **Qwen/Qwen3-Reranker-4B** | 8.0GB | High quality reranking |
+| **Qwen/Qwen3-Reranker-8B** | 16.0GB | Maximum quality reranking |
+
+**🆕 GGUF Quantized Models (Reduced Memory Usage)**
+| Model | Size | Best For |
+|-------|------|----------|
+| **Mungert/Qwen3-Reranker-0.6B-GGUF** | 0.3GB | Quantized lightweight, very fast |
+| **Mungert/Qwen3-Reranker-4B-GGUF** | 2.0GB | Quantized high quality |
+| **Mungert/Qwen3-Reranker-8B-GGUF** | 4.0GB | Quantized maximum quality |
+
+#### 🆕 DeepInfra Model
+
+| Model | Best For |
+|-------|----------|
+| **Qwen/Qwen3-Reranker-8B** | High-quality cross-encoder reranking via DeepInfra API |
+
+### Configuration
+
+#### Option 1: Local Reranking (Standard Models)
+```bash
+# Enable reranking with local models
+PDFKB_ENABLE_RERANKER=true
+PDFKB_RERANKER_PROVIDER=local  # Default
+
+# Choose reranker model
+PDFKB_RERANKER_MODEL="Qwen/Qwen3-Reranker-0.6B"  # Default
+PDFKB_RERANKER_MODEL="Qwen/Qwen3-Reranker-4B"     # Higher quality
+PDFKB_RERANKER_MODEL="Qwen/Qwen3-Reranker-8B"     # Maximum quality
+
+# Configure candidate sampling
+PDFKB_RERANKER_SAMPLE_ADDITIONAL=5  # Default: get 5 extra candidates for reranking
+
+# Optional: specify device
+PDFKB_RERANKER_DEVICE="mps"         # For Apple Silicon
+PDFKB_RERANKER_DEVICE="cuda"        # For NVIDIA GPUs
+PDFKB_RERANKER_DEVICE="cpu"         # For CPU-only
+```
+
+#### Option 2: GGUF Quantized Local Reranking (Memory Optimized)
+```bash
+# Enable reranking with GGUF quantized models
+PDFKB_ENABLE_RERANKER=true
+PDFKB_RERANKER_PROVIDER=local
+
+# Choose GGUF reranker model
+PDFKB_RERANKER_MODEL="Mungert/Qwen3-Reranker-0.6B-GGUF"  # Smallest
+PDFKB_RERANKER_MODEL="Mungert/Qwen3-Reranker-4B-GGUF"    # Balanced
+PDFKB_RERANKER_MODEL="Mungert/Qwen3-Reranker-8B-GGUF"    # Highest quality
+
+# Configure GGUF quantization level
+PDFKB_RERANKER_GGUF_QUANTIZATION="Q6_K"  # Balanced (recommended)
+PDFKB_RERANKER_GGUF_QUANTIZATION="Q8_0"  # Higher quality, larger
+PDFKB_RERANKER_GGUF_QUANTIZATION="Q4_K_M" # Smaller, lower quality
+
+# Configure candidate sampling
+PDFKB_RERANKER_SAMPLE_ADDITIONAL=5  # Default: get 5 extra candidates
+```
+
+#### 🆕 Option 3: DeepInfra Reranking (API-based)
+```bash
+# Enable reranking with DeepInfra
+PDFKB_ENABLE_RERANKER=true
+PDFKB_RERANKER_PROVIDER=deepinfra
+
+# Set your DeepInfra API key
+PDFKB_DEEPINFRA_API_KEY="your-deepinfra-api-key"
+
+# Optional: Choose model (default: Qwen/Qwen3-Reranker-8B)
+# Available: Qwen/Qwen3-Reranker-0.6B, Qwen/Qwen3-Reranker-4B, Qwen/Qwen3-Reranker-8B
+PDFKB_DEEPINFRA_RERANKER_MODEL="Qwen/Qwen3-Reranker-8B"
+
+# Configure candidate sampling
+PDFKB_RERANKER_SAMPLE_ADDITIONAL=8  # Sample 8 extra docs for reranking
+```
+
+**About DeepInfra Reranker**:
+- Supports three Qwen3-Reranker models:
+  - **0.6B**: Lightweight model, fastest inference
+  - **4B**: Balanced model with good quality and speed
+  - **8B**: Maximum quality model (default)
+- Optimized for high-quality cross-encoder relevance scoring
+- Pay-per-use pricing model
+- Get your API key at https://deepinfra.com
+- Note: The API requires equal-length query and document arrays, so the query is duplicated for each document internally
+
+#### Complete Examples
+
+**Local Reranking with GGUF Models**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true",
+        "PDFKB_ENABLE_RERANKER": "true",
+        "PDFKB_RERANKER_PROVIDER": "local",
+        "PDFKB_RERANKER_MODEL": "Mungert/Qwen3-Reranker-4B-GGUF",
+        "PDFKB_RERANKER_GGUF_QUANTIZATION": "Q6_K",
+        "PDFKB_RERANKER_SAMPLE_ADDITIONAL": "8",
+        "PDFKB_LOCAL_EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-0.6B-GGUF",
+        "PDFKB_GGUF_QUANTIZATION": "Q6_K"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**🆕 DeepInfra Reranking with Local Embeddings**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true",
+        "PDFKB_ENABLE_RERANKER": "true",
+        "PDFKB_RERANKER_PROVIDER": "deepinfra",
+        "PDFKB_DEEPINFRA_API_KEY": "your-deepinfra-api-key",
+        "PDFKB_RERANKER_SAMPLE_ADDITIONAL": "8",
+        "PDFKB_LOCAL_EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-0.6B",
+        "PDFKB_EMBEDDING_PROVIDER": "local"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+### Performance Impact
+
+**Search Quality**: Reranking typically improves search relevance by 15-30% by better understanding query intent and document relevance.
+
+**Memory Usage**:
+- Local standard models: 1.2GB - 16GB depending on model size
+- GGUF quantized: 0.3GB - 4GB depending on model and quantization
+- DeepInfra: No local memory usage (API-based)
+
+**Speed**:
+- Local models: Adds ~100-500ms per search
+- GGUF models: Slightly slower initial load, similar inference
+- DeepInfra: Adds ~200-800ms depending on API latency
+
+**Cost**:
+- Local models: Free after initial download
+- DeepInfra: Pay-per-use based on token usage
+
+### When to Use Reranking
+
+**✅ Recommended for:**
+- High-stakes searches where quality matters most
+- Complex queries requiring nuanced understanding
+- Large document collections with diverse content
+- When you have adequate hardware resources
+
+**❌ Skip reranking for:**
+- Simple keyword-based searches
+- Real-time applications requiring sub-100ms responses
+- Limited memory/compute environments
+- Very small document collections (<100 documents)
+
+### GGUF Quantization Recommendations
+
+For GGUF reranker models, choose quantization based on your needs:
+
+- **Q6_K** (recommended): Best balance of quality and size
+- **Q8_0**: Near-original quality with moderate compression
+- **F16**: Original quality, minimal compression
+- **Q4_K_M**: Maximum compression, acceptable quality loss
+- **Q4_K_S**: Small size, lower quality
+- **Q5_K_M**: Medium compression and quality
+- **Q5_K_S**: Smaller variant of Q5
 
 ## 🔍 Hybrid Search
 
@@ -966,6 +1268,15 @@ Document Type & Priority?
 | `PDFKB_HYBRID_VECTOR_WEIGHT` | `0.6` | Weight for semantic search (0-1, must sum to 1 with text weight) |
 | `PDFKB_HYBRID_TEXT_WEIGHT` | `0.4` | Weight for keyword/BM25 search (0-1, must sum to 1 with vector weight) |
 | `PDFKB_RRF_K` | `60` | Reciprocal Rank Fusion constant (higher = less emphasis on rank differences) |
+| `PDFKB_LOCAL_EMBEDDING_MODEL` | `Qwen/Qwen3-Embedding-0.6B` | Local embedding model (Qwen3-Embedding series only) |
+| `PDFKB_GGUF_QUANTIZATION` | `Q6_K` | GGUF quantization level (Q8_0, F16, Q6_K, Q4_K_M, Q4_K_S, Q5_K_M, Q5_K_S) |
+| `PDFKB_ENABLE_RERANKER` | `false` | Enable/disable result reranking for improved search quality |
+| `PDFKB_RERANKER_PROVIDER` | `local` | Reranker provider: 'local' or 'deepinfra' |
+| `PDFKB_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | Reranker model for local provider |
+| `PDFKB_RERANKER_SAMPLE_ADDITIONAL` | `5` | Additional results to sample for reranking |
+| `PDFKB_RERANKER_GGUF_QUANTIZATION` | *optional* | GGUF quantization level (Q6_K, Q8_0, etc.) |
+| `PDFKB_DEEPINFRA_API_KEY` | *required* | DeepInfra API key for reranking |
+| `PDFKB_DEEPINFRA_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-8B` | DeepInfra model: 0.6B, 4B, or 8B |
 
 ## 🖥️ MCP Client Setup
 
@@ -1356,6 +1667,21 @@ pip install -e ".[dev]"
 | `PDFKB_OPENAI_API_BASE` | *optional* | Custom base URL for OpenAI-compatible APIs |
 | `PDFKB_HUGGINGFACE_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace model |
 | `PDFKB_HUGGINGFACE_PROVIDER` | *optional* | HuggingFace provider (e.g., "nebius") |
+| `PDFKB_LOCAL_EMBEDDING_MODEL` | `Qwen/Qwen3-Embedding-0.6B` | Local embedding model (Qwen3-Embedding series only) |
+| `PDFKB_GGUF_QUANTIZATION` | `Q6_K` | GGUF quantization level (Q8_0, F16, Q6_K, Q4_K_M, Q4_K_S, Q5_K_M, Q5_K_S) |
+| `PDFKB_EMBEDDING_DEVICE` | `auto` | Hardware device (auto, mps, cuda, cpu) |
+| `PDFKB_USE_MODEL_OPTIMIZATION` | `true` | Enable torch.compile optimization |
+| `PDFKB_EMBEDDING_CACHE_SIZE` | `10000` | Number of cached embeddings in LRU cache |
+| `PDFKB_MODEL_CACHE_DIR` | `~/.cache/huggingface` | Local model cache directory |
+| `PDFKB_ENABLE_RERANKER` | `false` | Enable/disable result reranking |
+| `PDFKB_RERANKER_PROVIDER` | `local` | Reranker provider: 'local' or 'deepinfra' |
+| `PDFKB_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | Reranker model for local provider |
+| `PDFKB_RERANKER_SAMPLE_ADDITIONAL` | `5` | Additional results to sample for reranking |
+| `PDFKB_RERANKER_DEVICE` | `auto` | Hardware device for local reranker (auto, mps, cuda, cpu) |
+| `PDFKB_RERANKER_MODEL_CACHE_DIR` | `~/.cache/pdfkb-mcp/reranker` | Cache directory for local reranker models |
+| `PDFKB_RERANKER_GGUF_QUANTIZATION` | *optional* | GGUF quantization level (Q6_K, Q8_0, etc.) |
+| `PDFKB_DEEPINFRA_API_KEY` | *required* | DeepInfra API key for reranking |
+| `PDFKB_DEEPINFRA_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-8B` | Model: Qwen/Qwen3-Reranker-0.6B, 4B, or 8B |
 | `PDFKB_EMBEDDING_BATCH_SIZE` | `100` | Embedding batch size |
 | `PDFKB_MAX_PARALLEL_PARSING` | `1` | Max concurrent PDF parsing operations |
 | `PDFKB_MAX_PARALLEL_EMBEDDING` | `1` | Max concurrent embedding operations |

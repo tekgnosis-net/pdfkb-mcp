@@ -46,6 +46,9 @@ class ServerConfig:
     embedding_dimension: int = 0  # 0 uses model default
     fallback_to_openai: bool = False
 
+    # GGUF configuration for quantized models
+    gguf_quantization: str = "Q6_K"  # Default quantization (Q8_0, F16, Q6_K, Q4_K_M, etc.)
+
     # HuggingFace embedding configuration
     huggingface_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # Default lightweight model
     huggingface_provider: Optional[str] = None  # Provider like "nebius", None for auto/default
@@ -83,6 +86,8 @@ class ServerConfig:
         default_factory=lambda: {"vector": 0.6, "text": 0.4}  # Semantic search weight  # BM25 search weight
     )
     rrf_k: int = 60  # RRF constant parameter
+    hybrid_expansion_factor: float = 2.0  # How much to expand limit for better fusion
+    hybrid_max_expanded_limit: int = 30  # Maximum expanded limit for hybrid search
 
     # Whoosh-specific configuration
     whoosh_index_dir: str = ""  # Auto-set to cache_dir/whoosh
@@ -112,6 +117,19 @@ class ServerConfig:
     max_parallel_embedding: int = 1  # Max number of documents to embed simultaneously (default: 1 to prevent overload)
     background_queue_workers: int = 2  # Total background queue workers
     thread_pool_size: int = 1  # Thread pool size for CPU-intensive operations
+
+    # Reranker configuration
+    enable_reranker: bool = False  # Disabled by default for backwards compatibility
+    reranker_provider: str = "local"  # Provider: local or deepinfra
+    reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"  # Default reranker model
+    reranker_sample_additional: int = 5  # Additional results to sample for reranking
+    reranker_device: str = ""  # Auto-detect or specific device for reranker (local only)
+    reranker_model_cache_dir: str = "~/.cache/pdfkb-mcp/reranker"  # Cache directory for reranker models
+    reranker_gguf_quantization: str = ""  # GGUF quantization for reranker (e.g., Q6_K, Q8_0)
+
+    # DeepInfra configuration
+    deepinfra_api_key: str = ""  # API key for DeepInfra reranker
+    deepinfra_reranker_model: str = "Qwen/Qwen3-Reranker-8B"  # DeepInfra model: 0.6B, 4B, or 8B
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -460,6 +478,10 @@ class ServerConfig:
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_EMBEDDING_CACHE_SIZE: {embedding_cache_size}")
 
+        gguf_quantization = os.getenv("PDFKB_GGUF_QUANTIZATION")
+        if gguf_quantization:
+            config_kwargs["gguf_quantization"] = gguf_quantization
+
         # Parse HuggingFace embedding configuration
         huggingface_embedding_model = os.getenv("PDFKB_HUGGINGFACE_EMBEDDING_MODEL")
         if huggingface_embedding_model:
@@ -793,6 +815,18 @@ class ServerConfig:
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_RRF_K: {rrf_k}")
 
+        if hybrid_expansion_factor := os.getenv("PDFKB_HYBRID_EXPANSION_FACTOR"):
+            try:
+                config_kwargs["hybrid_expansion_factor"] = float(hybrid_expansion_factor)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_HYBRID_EXPANSION_FACTOR: {hybrid_expansion_factor}")
+
+        if hybrid_max_expanded_limit := os.getenv("PDFKB_HYBRID_MAX_EXPANDED_LIMIT"):
+            try:
+                config_kwargs["hybrid_max_expanded_limit"] = int(hybrid_max_expanded_limit)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_HYBRID_MAX_EXPANDED_LIMIT: {hybrid_max_expanded_limit}")
+
         # Parse parallel processing configuration
         if max_parallel_parsing := os.getenv("PDFKB_MAX_PARALLEL_PARSING"):
             try:
@@ -817,6 +851,38 @@ class ServerConfig:
                 config_kwargs["thread_pool_size"] = int(thread_pool_size)
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_THREAD_POOL_SIZE: {thread_pool_size}")
+
+        # Parse reranker configuration
+        if enable_reranker := os.getenv("PDFKB_ENABLE_RERANKER"):
+            config_kwargs["enable_reranker"] = enable_reranker.lower() in ["true", "1", "yes"]
+
+        if reranker_provider := os.getenv("PDFKB_RERANKER_PROVIDER"):
+            config_kwargs["reranker_provider"] = reranker_provider.lower()
+
+        if reranker_model := os.getenv("PDFKB_RERANKER_MODEL"):
+            config_kwargs["reranker_model"] = reranker_model
+
+        if reranker_sample_additional := os.getenv("PDFKB_RERANKER_SAMPLE_ADDITIONAL"):
+            try:
+                config_kwargs["reranker_sample_additional"] = int(reranker_sample_additional)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_RERANKER_SAMPLE_ADDITIONAL: {reranker_sample_additional}")
+
+        if reranker_device := os.getenv("PDFKB_RERANKER_DEVICE"):
+            config_kwargs["reranker_device"] = reranker_device
+
+        if reranker_model_cache_dir := os.getenv("PDFKB_RERANKER_MODEL_CACHE_DIR"):
+            config_kwargs["reranker_model_cache_dir"] = reranker_model_cache_dir
+
+        if reranker_gguf_quantization := os.getenv("PDFKB_RERANKER_GGUF_QUANTIZATION"):
+            config_kwargs["reranker_gguf_quantization"] = reranker_gguf_quantization
+
+        # DeepInfra configuration
+        if deepinfra_api_key := os.getenv("PDFKB_DEEPINFRA_API_KEY"):
+            config_kwargs["deepinfra_api_key"] = deepinfra_api_key
+
+        if deepinfra_reranker_model := os.getenv("PDFKB_DEEPINFRA_RERANKER_MODEL"):
+            config_kwargs["deepinfra_reranker_model"] = deepinfra_reranker_model
 
         return cls(**config_kwargs)
 

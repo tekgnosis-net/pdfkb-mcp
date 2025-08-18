@@ -24,6 +24,7 @@ class VectorStore:
         self.collection = None
         self.collection_name = "pdf_knowledgebase"
         self._embedding_service = None
+        self._reranker_service = None
         self.text_index = None
         self.hybrid_engine = None
 
@@ -40,6 +41,14 @@ class VectorStore:
             embedding_service: EmbeddingService instance.
         """
         self._embedding_service = embedding_service
+
+    def set_reranker_service(self, reranker_service) -> None:
+        """Set the reranker service for result reranking.
+
+        Args:
+            reranker_service: RerankerService instance or None.
+        """
+        self._reranker_service = reranker_service
 
     async def initialize(self) -> None:
         """Initialize the Chroma client and collection."""
@@ -177,16 +186,38 @@ class VectorStore:
         Returns:
             List of search results ordered by score.
         """
+        # Determine if we should use reranking
+        use_reranker = self._reranker_service is not None and self.config.enable_reranker
+
+        # If using reranker, expand the search to get more candidates
+        if use_reranker:
+            expanded_limit = query.limit + self.config.reranker_sample_additional
+            expanded_query = SearchQuery(
+                query=query.query,
+                limit=expanded_limit,
+                metadata_filter=query.metadata_filter,
+                min_score=query.min_score,
+                search_type=query.search_type,
+            )
+        else:
+            expanded_query = query
+
         # Route search based on query type and configuration
-        if not self.config.enable_hybrid_search or query.search_type == "vector":
-            return await self._vector_search(query, query_embedding)
-        elif query.search_type == "text" and self.text_index:
-            return await self._text_search(query)
-        elif query.search_type == "hybrid" and self.hybrid_engine:
-            return await self.hybrid_engine.search(query, query_embedding)
+        if not self.config.enable_hybrid_search or expanded_query.search_type == "vector":
+            search_results = await self._vector_search(expanded_query, query_embedding)
+        elif expanded_query.search_type == "text" and self.text_index:
+            search_results = await self._text_search(expanded_query)
+        elif expanded_query.search_type == "hybrid" and self.hybrid_engine:
+            search_results = await self.hybrid_engine.search(expanded_query, query_embedding)
         else:
             # Fall back to vector search
-            return await self._vector_search(query, query_embedding)
+            search_results = await self._vector_search(expanded_query, query_embedding)
+
+        # Apply reranking if enabled and we have results
+        if use_reranker and search_results:
+            search_results = await self._apply_reranking(query.query, search_results, query.limit)
+
+        return search_results
 
     async def _vector_search(self, query: SearchQuery, query_embedding: List[float]) -> List[SearchResult]:
         """Search for similar chunks using vector similarity.
@@ -684,6 +715,50 @@ class VectorStore:
             metadata=doc_metadata,
         )
 
+    async def _apply_reranking(
+        self, query: str, search_results: List[SearchResult], final_limit: int
+    ) -> List[SearchResult]:
+        """Apply reranking to search results.
+
+        Args:
+            query: The search query.
+            search_results: Initial search results to rerank.
+            final_limit: Final number of results to return.
+
+        Returns:
+            Reranked search results limited to final_limit.
+        """
+        try:
+            if not self._reranker_service or not search_results:
+                return search_results[:final_limit]
+
+            # Extract texts from search results
+            documents = [result.chunk.text for result in search_results]
+
+            # Apply reranking
+            rerank_results = await self._reranker_service.rerank(query, documents)
+
+            # Reorder search results based on reranking scores
+            reranked_results = []
+            for original_index, rerank_score in rerank_results:
+                if original_index < len(search_results):
+                    result = search_results[original_index]
+                    # Update the result with reranking information
+                    result.score = rerank_score
+                    result.search_type = "reranked"
+                    reranked_results.append(result)
+
+            # Return only the requested number of results
+            final_results = reranked_results[:final_limit]
+
+            logger.info(f"Reranked {len(search_results)} results, returning top {len(final_results)}")
+            return final_results
+
+        except Exception as e:
+            logger.error(f"Failed to apply reranking: {e}")
+            # Fall back to original results on error
+            return search_results[:final_limit]
+
     async def reset_database(self) -> None:
         """Reset the entire vector database by deleting and recreating the collection.
 
@@ -729,6 +804,7 @@ class VectorStore:
             self.client = None
             self.collection = None
             self.hybrid_engine = None
+            self._reranker_service = None
             logger.info("Vector store closed")
 
         except Exception as e:

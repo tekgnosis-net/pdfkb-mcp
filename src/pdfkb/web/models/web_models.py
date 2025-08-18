@@ -194,6 +194,8 @@ class ConfigOverviewResponse(BaseModel):
     chunk_size: int = Field(..., description="Text chunk size")
     chunk_overlap: int = Field(..., description="Text chunk overlap")
     vector_search_k: int = Field(..., description="Default search result count")
+    reranker_enabled: bool = Field(..., description="Whether reranker is enabled")
+    reranker_model: Optional[str] = Field(None, description="Current reranker model")
     web_enabled: bool = Field(..., description="Whether web interface is enabled")
     web_port: int = Field(..., description="Web server port")
     web_host: str = Field(..., description="Web server host")

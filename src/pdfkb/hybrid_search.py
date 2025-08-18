@@ -39,7 +39,10 @@ class HybridSearchEngine:
         try:
             # Execute searches in parallel
             # Get more results than requested for better fusion
-            expanded_limit = min(query.limit * 3, 50)
+            # Note: query.limit may already be expanded by reranker, so be conservative
+            expansion_factor = self.config.hybrid_expansion_factor
+            max_limit = self.config.hybrid_max_expanded_limit
+            expanded_limit = min(int(query.limit * expansion_factor), max_limit)
 
             # Create tasks for parallel execution
             vector_task = asyncio.create_task(self._vector_search(query, query_embedding, expanded_limit))

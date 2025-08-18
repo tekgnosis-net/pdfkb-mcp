@@ -19,6 +19,8 @@ def test_config():
     config.hybrid_search_weights = {"vector": 0.6, "text": 0.4}
     config.rrf_k = 60
     config.whoosh_min_score = 0.0
+    config.hybrid_expansion_factor = 2.0
+    config.hybrid_max_expanded_limit = 30
     return config
 
 
@@ -368,7 +370,7 @@ class TestHybridSearchEngine:
         assert all(r.text_score is not None for r in results)
         assert all(r.vector_score is None for r in results)
 
-    async def test_expanded_limit(self, hybrid_engine, mock_vector_store, mock_text_index):
+    async def test_expanded_limit(self, hybrid_engine, mock_vector_store, mock_text_index, test_config):
         """Test that searches use expanded limit for better fusion."""
         query = SearchQuery(query="test", limit=5)
         query_embedding = [0.1] * 768
@@ -378,8 +380,10 @@ class TestHybridSearchEngine:
 
         await hybrid_engine.search(query, query_embedding)
 
-        # Check that expanded limit was used (3x original, max 50)
-        expected_limit = min(5 * 3, 50)
+        # Check that expanded limit was used (configured expansion factor)
+        expansion_factor = test_config.hybrid_expansion_factor
+        max_limit = test_config.hybrid_max_expanded_limit
+        expected_limit = min(int(5 * expansion_factor), max_limit)
 
         # Get the actual calls
         vector_call = mock_vector_store._vector_search.call_args
