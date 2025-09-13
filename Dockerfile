@@ -46,15 +46,15 @@ COPY pyproject.toml .
 COPY src/ src/
 COPY README.md .
 
-# Install build dependencies and build the package
-RUN pip install --upgrade pip setuptools wheel
+# Install UV (Rust-based Python package installer) for faster builds
+RUN pip install --upgrade uv
 
 # Install the package with all dependencies from pyproject.toml
 # This eliminates the need to manually specify dependencies in the Dockerfile
-RUN pip install --no-cache-dir -e .
+RUN uv pip install --system --no-cache -e .
 
 # Build wheels for all dependencies to use in runtime stage
-RUN pip freeze > requirements.txt && pip wheel --wheel-dir /build/wheels -r requirements.txt
+RUN uv pip freeze --system > requirements.txt && pip wheel --wheel-dir /build/wheels -r requirements.txt
 
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
@@ -127,11 +127,14 @@ WORKDIR ${PDFKB_APP_DIR}
 # Copy wheels from builder stage
 COPY --from=builder --chown=pdfkb:pdfkb /build/wheels /tmp/wheels
 
-# Install Python packages from wheels (as non-root user)
-RUN pip install --user --no-cache-dir --no-index --find-links /tmp/wheels \
+# Install Python packages from wheels (as root for system install)
+USER root
+RUN pip install --upgrade uv
+RUN uv pip install --system --no-cache --no-index --find-links /tmp/wheels \
     # Use the wheels we built in the previous stage
     pdfkb-mcp \
     && rm -rf /tmp/wheels
+USER pdfkb
 
 # Copy application source code
 COPY --chown=pdfkb:pdfkb src/ src/
