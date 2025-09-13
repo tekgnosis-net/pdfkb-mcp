@@ -274,9 +274,32 @@ class FileMonitor:
             logger.error(f"Error stopping file monitor: {e}")
 
     async def startup_synchronization(self) -> None:
-        """Synchronize file system state with cached metadata on startup."""
+        """Synchronize file system state with cached metadata on startup.
+
+        This method performs a non-blocking startup synchronization by queuing files
+        for background processing and returning immediately to avoid blocking server initialization.
+        """
         try:
             logger.info("Performing startup synchronization...")
+
+            # Run synchronization in a separate task to avoid blocking
+            asyncio.create_task(self._perform_startup_sync())
+
+            # Return immediately - don't wait for file processing
+            logger.info("Startup synchronization initiated - files will be processed in background")
+
+        except Exception as e:
+            logger.error(f"Startup synchronization failed: {e}")
+            # Don't raise here to avoid blocking server startup
+            logger.warning("Continuing server startup despite sync error")
+
+    async def _perform_startup_sync(self) -> None:
+        """Internal method that performs the actual startup synchronization work.
+
+        This runs in a separate task to avoid blocking the main initialization flow.
+        """
+        try:
+            logger.info("Background startup synchronization starting...")
 
             current_files = await self.scan_directory()
             cached_files = set(self.file_index.keys())
@@ -305,6 +328,7 @@ class FileMonitor:
                             # Update our file index with the existing document info
                             try:
                                 stat = file_path.stat()
+                                # Calculate checksum in executor to avoid blocking
                                 checksum = await self.get_file_checksum(file_path)
                                 metadata = FileMetadata(
                                     path=str(file_path.resolve()),
@@ -314,7 +338,7 @@ class FileMonitor:
                                     processed_time=time.time(),
                                     document_id=doc_id,
                                 )
-                                await self.update_file_metadata(file_path, metadata)
+                                await self.update_file_metadata(file_path, metadata, save_immediately=False)
                                 logger.debug(f"Updated file index for existing document {file_path}")
                             except Exception as e:
                                 logger.warning(f"Failed to update file index for existing document {file_path}: {e}")
@@ -343,45 +367,55 @@ class FileMonitor:
                         modified_files.append(file_path)
 
             logger.info(
-                f"Startup sync: {len(new_files)} new, {len(modified_files)} modified, {len(deleted_files)} deleted"
+                f"Background startup sync: {len(new_files)} new, "
+                f"{len(modified_files)} modified, {len(deleted_files)} deleted"
             )
 
             # Queue changes for background processing (non-blocking)
             files_queued = 0
             for file_path in new_files:
                 if self.background_queue:
-                    logger.info(f"🚀 STARTUP SYNC: Queuing NEW file {file_path} for BACKGROUND processing")
+                    logger.info(f"🚀 BACKGROUND STARTUP SYNC: Queuing NEW file {file_path} for processing")
                     await self._queue_file_for_processing(file_path, JobType.FILE_WATCHER)
                     files_queued += 1
                 else:
                     logger.warning(
-                        f"⚠️ STARTUP SYNC: No background queue, queuing NEW file {file_path} for SYNCHRONOUS processing"
+                        f"⚠️ BACKGROUND STARTUP SYNC: No background queue, "
+                        f"queuing NEW file {file_path} for SYNCHRONOUS processing"
                     )
                     await self._queue_file_processing(file_path, "created")
 
             for file_path in modified_files:
                 if self.background_queue:
-                    logger.info(f"🚀 STARTUP SYNC: Queuing MODIFIED file {file_path} for BACKGROUND processing")
+                    logger.info(f"🚀 BACKGROUND STARTUP SYNC: Queuing MODIFIED file {file_path} for processing")
                     await self._queue_file_for_processing(file_path, JobType.FILE_WATCHER)
                     files_queued += 1
                 else:
                     logger.warning(
-                        f"⚠️ STARTUP SYNC: No background queue, queuing MODIFIED file {file_path} "
+                        f"⚠️ BACKGROUND STARTUP SYNC: No background queue, queuing MODIFIED file {file_path} "
                         f"for SYNCHRONOUS processing"
                     )
                     await self._queue_file_processing(file_path, "modified")
 
+            # Process deleted files immediately (fast operation)
             for file_path in deleted_files:
                 await self.remove_file(file_path)
 
             if files_queued > 0:
-                logger.info(f"Queued {files_queued} files for background processing - server will remain responsive")
+                logger.info(f"Background sync queued {files_queued} files for processing - server remains responsive")
 
-            logger.info("Startup synchronization completed - background processing will continue independently")
+            # Save the file index once after all metadata updates during startup
+            try:
+                await self.save_file_index()
+                logger.debug("Saved file index after background startup synchronization")
+            except Exception as e:
+                logger.warning(f"Failed to save file index after startup sync: {e}")
+
+            logger.info("Background startup synchronization completed - files continue processing independently")
 
         except Exception as e:
-            logger.error(f"Startup synchronization failed: {e}")
-            raise FileMonitorError(f"Startup synchronization failed: {e}", "startup_sync", e)
+            logger.error(f"Background startup synchronization failed: {e}")
+            # Don't raise - just log the error and continue
 
     def _is_excluded_directory(self, file_path: Path) -> bool:
         """Check if a file path is in an excluded directory.
@@ -884,32 +918,44 @@ class FileMonitor:
             async with self.index_lock:
                 data = {path: metadata.to_dict() for path, metadata in self.file_index.items()}
 
-            self._save_file_index_sync(data)
+            # Run save in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(self.executor, self._save_file_index_sync, data)
 
         except Exception as e:
             logger.error(f"Failed to save file index: {e}")
 
-    async def update_file_metadata(self, file_path: Path, metadata: FileMetadata) -> None:
+    async def update_file_metadata(
+        self, file_path: Path, metadata: FileMetadata, save_immediately: bool = True
+    ) -> None:
         """Update metadata for a file.
 
         Args:
             file_path: File path.
             metadata: New metadata.
+            save_immediately: Whether to save the file index immediately (default: True).
+                            Set to False during bulk operations to avoid blocking.
         """
         try:
             async with self.index_lock:
                 # Store normalized path (resolved to absolute path)
                 normalized_path = str(file_path.resolve())
                 self.file_index[normalized_path] = metadata
-                logger.info(
+                logger.debug(
                     f"Updated metadata for {file_path} (normalized: {normalized_path}), "
                     f"total files: {len(self.file_index)}"
                 )
-                # Always save after updating metadata to ensure persistence
-                logger.info(f"Saving file index after metadata update for {file_path}")
-                data = {path: metadata.to_dict() for path, metadata in self.file_index.items()}
-                self._save_file_index_sync(data)
-                logger.info(f"Completed saving file index after metadata update for {file_path}")
+
+                if save_immediately:
+                    # Save immediately for normal operations
+                    logger.debug(f"Saving file index after metadata update for {file_path}")
+                    data = {path: metadata.to_dict() for path, metadata in self.file_index.items()}
+                    # Run save in executor to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(self.executor, self._save_file_index_sync, data)
+                    logger.debug(f"Completed saving file index after metadata update for {file_path}")
+                else:
+                    logger.debug(f"Deferred file index save for {file_path} (bulk operation)")
 
         except Exception as e:
             logger.error(f"Failed to update file metadata for {file_path}: {e}")

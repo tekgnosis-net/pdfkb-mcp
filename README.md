@@ -2,25 +2,46 @@
 
 A Model Context Protocol (MCP) server that enables intelligent document search and retrieval from PDF collections. Built for seamless integration with Claude Desktop, Continue, Cline, and other MCP clients, this server provides advanced search capabilities powered by local, OpenAI, or HuggingFace embeddings and ChromaDB vector storage.
 
-**🆕 NEW Features:**
-- **Reranking Support**: Advanced result reranking using Qwen3-Reranker models (standard and GGUF) for improved search relevance
-- **GGUF Quantized Models**: Memory-optimized local embeddings and rerankers with 50-70% smaller models using GGUF quantization
-- **Qwen3-Embedding Exclusive Support**: Optimized support for the advanced Qwen3-Embedding model family only
-- **HuggingFace Inference Embeddings**: Use HuggingFace Inference API with support for custom providers like Nebius
-- **Custom OpenAI Endpoints**: Support for OpenAI-compatible APIs with custom base URLs
-- **Minimum Chunk Filtering**: Automatically filter out short, low-information chunks below configurable character threshold
-- **Markdown Document Support**: Native support for .md files with frontmatter parsing and page boundary detection
-- **Page-Based Chunking**: Preserve document structure with intelligent page-level chunk boundaries
-- **Semantic Chunking**: Advanced content-aware chunking using embedding similarity for better context preservation
-- **Local Embeddings**: Run embeddings locally with HuggingFace models - no API costs, full privacy
-- **Hybrid Search**: Combines semantic similarity with keyword matching (BM25) for superior search quality
-- **Web Interface**: Modern web UI for document management and search alongside the traditional MCP protocol
+## ✨ Major New Features
 
+### 🤖 Document Summarization (NEW!)
+**Automatically generate rich document metadata using AI**
+- **Local LLM Support**: Use Qwen3, Phi-3, and other local models - no API costs, full privacy
+- **Remote LLM Support**: OpenAI-compatible APIs for cloud-based summarization
+- **Rich Metadata**: Auto-generates titles, short descriptions, and detailed summaries
+- **Smart Content Processing**: Configurable page limits and intelligent content truncation
+- **Fallback Handling**: Graceful degradation when summarization fails
+
+### 🌐 Remote Access & Multi-Client Support (NEW!)
+**Access your document repository from anywhere**
+- **SSE Transport Mode**: Server-Sent Events for real-time remote access
+- **HTTP Transport Mode**: RESTful API access for modern MCP clients
+- **Multi-Client Architecture**: Share document processing across multiple clients
+- **Integrated Web + MCP**: Run both web interface and MCP server concurrently
+- **Flexible Deployment**: Local, remote, or hybrid deployment modes
+
+### 🎯 Advanced Search & Intelligence
+**Best-in-class document retrieval capabilities**
+- **Hybrid Search**: Combines semantic similarity with keyword matching (BM25)
+- **Reranking Support**: Qwen3-Reranker models for improved search relevance
+- **GGUF Quantized Models**: 50-70% smaller models with maintained quality
+- **Local Embeddings**: Full privacy with HuggingFace models - no API costs
+- **Custom Endpoints**: Support for OpenAI-compatible APIs and custom providers
+- **Semantic Chunking**: Content-aware chunking for better context preservation
+
+### 🔄 Enterprise-Ready Operations
+**Production-ready document processing**
+- **Non-blocking Operations**: Background processing with graceful startup
+- **Intelligent Caching**: Multi-stage caching with selective invalidation
+- **Enhanced Monitoring**: Better logging, error handling, and resource management
+- **Graceful Shutdown**: Configurable timeouts and proper cleanup
+- **Performance Optimized**: Improved memory usage and concurrent processing
 ## Table of Contents
 
 - [🚀 Quick Start](#-quick-start)
 - [🌐 Web Interface](#-web-interface)
 - [🏗️ Architecture Overview](#️-architecture-overview)
+- [📝 Document Summarization](#-document-summarization)
 - [🤖 Local Embeddings](#-local-embeddings)
 - [🔄 Reranking](#-reranking)
 - [🔍 Hybrid Search](#-hybrid-search)
@@ -37,7 +58,28 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 
 ### Step 1: Configure Your MCP Client
 
-**Option A: Local Embeddings w/ Hybrid Search (No API Key Required)**
+**🆕 Option A: Complete Local Setup with Document Summarization (No API Key Required)**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true",
+        "PDFKB_ENABLE_SUMMARIZER": "true",
+        "PDFKB_SUMMARIZER_PROVIDER": "local",
+        "PDFKB_SUMMARIZER_MODEL": "Qwen/Qwen3-4B-Instruct-2507-FP8"
+      },
+      "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**Option B: Local Embeddings w/ Hybrid Search (No API Key Required)**
 ```json
 {
   "mcpServers": {
@@ -49,6 +91,24 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
         "PDFKB_ENABLE_HYBRID_SEARCH": "true"
       },
       "transport": "stdio",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**🆕 Option B: Remote/SSE Mode (Accessible from Multiple Clients)**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp[hybrid]"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/Users/yourname/Documents",
+        "PDFKB_ENABLE_HYBRID_SEARCH": "true"
+      },
+      "transport": "sse",
       "autoRestart": true
     }
   }
@@ -154,8 +214,6 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
       },
       "transport": "stdio",
       "autoRestart": true
-    }
-  }
 }
 ```
 
@@ -169,9 +227,10 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 
 The PDF Knowledgebase includes a modern web interface for easy document management and search. **The web interface is disabled by default and must be explicitly enabled.**
 
+
 ### Server Modes
 
-**1. MCP Only Mode** (Default):
+**1. MCP Only Mode - Stdio Transport** (Default):
 ```bash
 pdfkb-mcp
 ```
@@ -179,7 +238,19 @@ pdfkb-mcp
 - Most resource-efficient option
 - Best for pure MCP integration
 
-**2. Integrated Mode** (MCP + Web):
+**2. MCP Only Mode - SSE/Remote Transport**:
+```bash
+# Option A: Environment variable
+PDFKB_TRANSPORT=sse pdfkb-mcp
+
+# Option B: Command line flags
+pdfkb-mcp --transport sse --sse-port 8000 --sse-host localhost
+```
+- Runs MCP server in SSE mode for remote access from multiple clients
+- MCP server available at http://localhost:8000 (or configured host/port)
+- Best for centralized document processing accessible from multiple clients
+
+**3. Integrated Mode** (MCP + Web):
 ```bash
 # Option A: Environment variable
 PDFKB_WEB_ENABLE=true pdfkb-mcp
@@ -189,8 +260,8 @@ pdfkb-mcp --enable-web
 ```
 - Runs both MCP server AND web interface concurrently
 - Web interface available at http://localhost:8080
+- MCP server runs in stdio mode by default (can be configured to SSE)
 - Best of both worlds: API integration + web UI
-
 ### Web Interface Features
 
 ![PDF Knowledgebase Web Interface - Documents List](docs/images/web_documents_list.png)
@@ -835,6 +906,143 @@ For GGUF reranker models, choose quantization based on your needs:
 - **Q5_K_M**: Medium compression and quality
 - **Q5_K_S**: Smaller variant of Q5
 
+## 📝 Document Summarization
+
+The server supports **automatic document summarization** to generate meaningful titles, short descriptions, and detailed summaries for each document. This creates rich metadata that improves document organization and search quality.
+
+### Summary Components
+
+Each processed document can automatically generate:
+- **Title**: A descriptive title that captures the document's main subject (max 80 characters)
+- **Short Description**: A concise 1-2 sentence summary (max 200 characters)
+- **Long Description**: A detailed paragraph explaining content, key points, and findings (max 500 characters)
+
+### Summarization Options
+
+#### Option 1: Local LLM Summarization
+
+```bash
+# Enable summarization with local LLM
+PDFKB_ENABLE_SUMMARIZER=true
+PDFKB_SUMMARIZER_PROVIDER=local
+
+# Model selection (default: Qwen/Qwen3-4B-Instruct-2507-FP8)
+PDFKB_SUMMARIZER_MODEL="Qwen/Qwen3-4B-Instruct-2507-FP8"  # Balanced (default)
+PDFKB_SUMMARIZER_MODEL="Qwen/Qwen3-1.5B-Instruct"        # Lightweight
+PDFKB_SUMMARIZER_MODEL="Qwen/Qwen3-8B-Instruct"          # High quality
+
+# Hardware configuration
+PDFKB_SUMMARIZER_DEVICE="auto"  # auto, mps, cuda, cpu
+PDFKB_SUMMARIZER_MODEL_CACHE_DIR="~/.cache/pdfkb-mcp/summarizer"
+
+# Content configuration
+PDFKB_SUMMARIZER_MAX_PAGES=10  # Number of pages to analyze (default: 10)
+```
+
+**About Local Summarization**:
+- Uses transformer-based instruction-tuned models locally
+- No API costs or external dependencies
+- Full privacy - content never leaves your machine
+- Supports multiple model sizes for different hardware capabilities
+- Configurable page limits to manage processing time
+
+#### Option 2: Remote LLM Summarization (OpenAI-Compatible)
+
+```bash
+# Enable summarization with remote API
+PDFKB_ENABLE_SUMMARIZER=true
+PDFKB_SUMMARIZER_PROVIDER=remote
+
+# API configuration
+PDFKB_SUMMARIZER_API_KEY="your-api-key"              # Optional, falls back to OPENAI_API_KEY
+PDFKB_SUMMARIZER_API_BASE="https://api.openai.com/v1"  # Custom API endpoint
+PDFKB_SUMMARIZER_MODEL="gpt-4"                      # Model to use
+
+# Content configuration
+PDFKB_SUMMARIZER_MAX_PAGES=10  # Number of pages to analyze
+```
+
+**About Remote Summarization**:
+- Works with OpenAI API and compatible services
+- Supports custom API endpoints for other providers
+- Higher quality summaries with advanced models
+- Pay-per-use pricing model
+- Faster processing for large documents
+
+### Usage Examples
+
+**Local Summarization with Custom Model**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/pdfs",
+        "PDFKB_ENABLE_SUMMARIZER": "true",
+        "PDFKB_SUMMARIZER_PROVIDER": "local",
+        "PDFKB_SUMMARIZER_MODEL": "Qwen/Qwen3-4B-Instruct-2507-FP8",
+        "PDFKB_SUMMARIZER_MAX_PAGES": "15",
+        "PDFKB_SUMMARIZER_DEVICE": "mps"
+      }
+    }
+  }
+}
+```
+
+**Remote Summarization with Custom Endpoint**
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/pdfs",
+        "PDFKB_ENABLE_SUMMARIZER": "true",
+        "PDFKB_SUMMARIZER_PROVIDER": "remote",
+        "PDFKB_SUMMARIZER_API_KEY": "your-api-key",
+        "PDFKB_SUMMARIZER_MODEL": "gpt-4",
+        "PDFKB_SUMMARIZER_MAX_PAGES": "20"
+      }
+    }
+  }
+}
+```
+
+### Performance Considerations
+
+**Local Models**:
+- **Qwen3-1.5B**: ~3GB RAM, fast processing, good quality
+- **Qwen3-4B-FP8**: ~8GB RAM, balanced speed/quality (recommended)
+- **Qwen3-8B**: ~16GB RAM, highest quality, slower processing
+
+**Remote Models**:
+- **GPT-3.5-turbo**: Fast, cost-effective, good quality
+- **GPT-4**: Highest quality, more expensive, slower
+- **Custom models**: Varies by provider
+
+**Page Limits**:
+- More pages = better context but slower processing
+- Recommended: 10-20 pages for most documents
+- Academic papers: 5-10 pages (focus on abstract/conclusion)
+- Technical manuals: 15-25 pages (capture key sections)
+
+### When to Use Summarization
+
+**Recommended for**:
+- Large document collections requiring organization
+- Research document management
+- Content discovery and browsing
+- Document metadata enhancement
+
+**Consider disabling for**:
+- Very small document collections
+- Documents with highly sensitive content (use local if needed)
+- Limited processing resources
+- Real-time document processing requirements
+
 ## 🔍 Hybrid Search
 
 The server now supports **Hybrid Search**, which combines the strengths of semantic similarity search (vector embeddings) with traditional keyword matching (BM25) for improved search quality.
@@ -1277,6 +1485,14 @@ Document Type & Priority?
 | `PDFKB_RERANKER_GGUF_QUANTIZATION` | *optional* | GGUF quantization level (Q6_K, Q8_0, etc.) |
 | `PDFKB_DEEPINFRA_API_KEY` | *required* | DeepInfra API key for reranking |
 | `PDFKB_DEEPINFRA_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-8B` | DeepInfra model: 0.6B, 4B, or 8B |
+| `PDFKB_ENABLE_SUMMARIZER` | `false` | Enable/disable document summarization |
+| `PDFKB_SUMMARIZER_PROVIDER` | `local` | Summarizer provider: 'local' or 'remote' |
+| `PDFKB_SUMMARIZER_MODEL` | `Qwen/Qwen3-4B-Instruct-2507-FP8` | Model for summarization |
+| `PDFKB_SUMMARIZER_MAX_PAGES` | `10` | Maximum pages to analyze for summarization |
+| `PDFKB_SUMMARIZER_DEVICE` | `auto` | Hardware device for local summarizer |
+| `PDFKB_SUMMARIZER_MODEL_CACHE_DIR` | `~/.cache/pdfkb-mcp/summarizer` | Cache directory for summarizer models |
+| `PDFKB_SUMMARIZER_API_BASE` | *optional* | Custom API base URL for remote summarizer |
+| `PDFKB_SUMMARIZER_API_KEY` | *optional* | API key for remote summarizer (fallback to OPENAI_API_KEY) |
 
 ## 🖥️ MCP Client Setup
 
@@ -1301,7 +1517,7 @@ Document Type & Priority?
       },
       "transport": "stdio",
       "autoRestart": true,
-                "PDFKB_EMBEDDING_MODEL": "text-embedding-3-small",
+                 "PDFKB_EMBEDDING_MODEL": "text-embedding-3-small",
     }
   }
 }
@@ -1312,9 +1528,33 @@ Document Type & Priority?
 2. Look for PDF KB tools in the interface
 3. Test with "Add a document" or "Search documents"
 
-### VS Code with Native MCP Support
+### 🆕 VS Code with Native MCP Support (SSE Mode)
 
-**Configuration** (`.vscode/mcp.json` in workspace):
+**Configuration for SSE/Remote Mode** (`.vscode/mcp.json` in workspace):
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/your/pdfs"
+      },
+      "transport": "sse",
+      "autoRestart": true
+    }
+  }
+}
+```
+
+**Verification**:
+1. Reload VS Code window
+2. Check VS Code's MCP server status in Command Palette
+3. Use MCP tools in Copilot Chat
+
+### VS Code with Continue Extension
+
+**Configuration** (`.continue/config.json`):
 ```json
 {
   "mcpServers": {
@@ -1474,6 +1714,65 @@ PDFKB_BACKGROUND_QUEUE_WORKERS=1   # Single background worker
   }
 }
 ```
+
+**🆕 SSE/Remote Mode - Client Connection Issues**:
+```json
+// ❌ Wrong: Missing URL for SSE transport (client can't connect)
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_TRANSPORT": "sse"
+      },
+      "transport": "sse"
+    }
+  }
+}
+
+// ✅ Correct: Include URL pointing to SSE server
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "uvx",
+      "args": ["pdfkb-mcp"],
+      "env": {
+        "PDFKB_KNOWLEDGEBASE_PATH": "/path/to/pdfs",
+        "PDFKB_TRANSPORT": "sse",
+        "PDFKB_SSE_HOST": "localhost",
+        "PDFKB_SSE_PORT": "8000"
+      },
+      "transport": "sse",
+      "url": "http://localhost:8000"
+    }
+  }
+}
+```
+**Tip**: Ensure the SSE server is running first (`pdfkb-mcp --transport sse --sse-port 8000`), then configure the client with the correct URL. Check firewall settings if connecting remotely.
+
+**🆕 SSE/Remote Mode - Port Conflicts in Integrated Mode**:
+```bash
+# ❌ Wrong: Web and SSE using same port (will fail to start)
+PDFKB_WEB_ENABLE=true PDFKB_WEB_PORT=8000 PDFKB_TRANSPORT=sse PDFKB_SSE_PORT=8000 pdfkb-mcp
+
+# ✅ Correct: Use different ports for web (8080) and SSE (8000)
+PDFKB_WEB_ENABLE=true PDFKB_WEB_PORT=8080 PDFKB_TRANSPORT=sse PDFKB_SSE_PORT=8000 pdfkb-mcp
+```
+**Tip**: The server validates port conflicts on startup. Web interface runs on `PDFKB_WEB_PORT` (default 8080), SSE MCP runs on `PDFKB_SSE_PORT` (default 8000). Access web at http://localhost:8080 and connect MCP clients to http://localhost:8000.
+
+**🆕 SSE/Remote Mode - Server Not Starting in SSE Mode**:
+```bash
+# ❌ Wrong: Invalid transport value (server defaults to stdio)
+PDFKB_TRANSPORT=remote pdfkb-mcp  # 'remote' is invalid
+
+# ✅ Correct: Use 'sse' for remote transport
+PDFKB_TRANSPORT=sse pdfkb-mcp --sse-host 0.0.0.0 --sse-port 8000
+
+# Or via command line flags
+pdfkb-mcp --transport sse --sse-host localhost --sse-port 8000
+```
+**Tip**: Valid transport values are 'stdio' (default) or 'sse'. Check server logs for "Running MCP server in SSE mode on http://host:port" confirmation. Use `--log-level DEBUG` for detailed startup information.
 
 ### Resource Requirements
 
@@ -1682,6 +1981,14 @@ pip install -e ".[dev]"
 | `PDFKB_RERANKER_GGUF_QUANTIZATION` | *optional* | GGUF quantization level (Q6_K, Q8_0, etc.) |
 | `PDFKB_DEEPINFRA_API_KEY` | *required* | DeepInfra API key for reranking |
 | `PDFKB_DEEPINFRA_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-8B` | Model: Qwen/Qwen3-Reranker-0.6B, 4B, or 8B |
+| `PDFKB_ENABLE_SUMMARIZER` | `false` | Enable/disable document summarization |
+| `PDFKB_SUMMARIZER_PROVIDER` | `local` | Summarizer provider: 'local' or 'remote' |
+| `PDFKB_SUMMARIZER_MODEL` | `Qwen/Qwen3-4B-Instruct-2507-FP8` | Model for summarization |
+| `PDFKB_SUMMARIZER_MAX_PAGES` | `10` | Maximum pages to analyze for summarization |
+| `PDFKB_SUMMARIZER_DEVICE` | `auto` | Hardware device for local summarizer |
+| `PDFKB_SUMMARIZER_MODEL_CACHE_DIR` | `~/.cache/pdfkb-mcp/summarizer` | Cache directory for summarizer models |
+| `PDFKB_SUMMARIZER_API_BASE` | *optional* | Custom API base URL for remote summarizer |
+| `PDFKB_SUMMARIZER_API_KEY` | *optional* | API key for remote summarizer |
 | `PDFKB_EMBEDDING_BATCH_SIZE` | `100` | Embedding batch size |
 | `PDFKB_MAX_PARALLEL_PARSING` | `1` | Max concurrent PDF parsing operations |
 | `PDFKB_MAX_PARALLEL_EMBEDDING` | `1` | Max concurrent embedding operations |

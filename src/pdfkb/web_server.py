@@ -85,16 +85,30 @@ class IntegratedPDFKnowledgebaseServer:
 
     def _validate_configuration(self) -> None:
         """Validate configuration for integrated server operation."""
-        # Check for port conflicts if web is enabled
-        if self.config.web_enabled:
-            # Validate web server configuration
+        # Validate MCP transport configuration
+        if self.config.transport not in ["stdio", "http", "sse"]:
+            raise ValueError(f"Invalid MCP transport mode: {self.config.transport}")
+
+        # For integrated mode, we use adjacent ports for MCP and web
+        if self.config.web_enabled and self.config.transport in ["http", "sse"]:
+            # Use server_port as the unified port
+            if self.config.server_port <= 0 or self.config.server_port > 65535:
+                raise ValueError(f"Invalid server port: {self.config.server_port}")
+            if not self.config.server_host:
+                raise ValueError("Server host cannot be empty")
+
+            # Set web configuration to match server configuration for unified approach
+            self.config.web_port = self.config.server_port
+            self.config.web_host = self.config.server_host
+
+        elif self.config.web_enabled:
+            # Web-only mode (no HTTP MCP)
             if self.config.web_port <= 0 or self.config.web_port > 65535:
                 raise ValueError(f"Invalid web server port: {self.config.web_port}")
-
             if not self.config.web_host:
                 raise ValueError("Web server host cannot be empty")
 
-            # Check if port is already in use
+            # Check if web port is already in use
             import socket
 
             try:
@@ -227,57 +241,73 @@ class IntegratedPDFKnowledgebaseServer:
             raise
 
     async def run_integrated(self) -> None:
-        """Run both MCP and web servers concurrently."""
+        """Run integrated server with MCP and web on single port (if web enabled)."""
         try:
             logger.info("Starting integrated server (MCP + Web)...")
             await self.initialize()
 
-            # Create tasks for both servers
-            tasks = []
+            if self.config.transport == "stdio":
+                # STDIO mode - run only MCP server
+                logger.info("Running MCP server in stdio mode...")
+                await self.mcp_server.run()
 
-            # MCP server task
-            mcp_task = asyncio.create_task(self._run_mcp_server())
-            tasks.append(mcp_task)
+            elif self.config.transport in ["http", "sse"]:
+                if self.config.web_enabled:
+                    # Integrated mode: dual server with MCP and web on adjacent ports
+                    logger.info(f"Running integrated server with {self.config.transport.upper()} MCP and web...")
+                    await self._run_unified_server()
+                else:
+                    # HTTP/SSE MCP only
+                    logger.info(f"Running MCP server in {self.config.transport.upper()} mode only...")
+                    await self.mcp_server.run()
 
-            # Web server task (if enabled)
-            if self.config.web_enabled and self.web_app:
-                web_task = asyncio.create_task(self._run_web_server())
-                tasks.append(web_task)
-                self._web_server_task = web_task
-
-            # Wait for shutdown signal or task completion
-            try:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            except KeyboardInterrupt:
-                logger.info("Received interrupt signal, shutting down integrated server...")
-                self._shutdown_event.set()
-
-                # Cancel all tasks
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-
-                # Wait for tasks to complete
-                await asyncio.gather(*tasks, return_exceptions=True)
-
+        except KeyboardInterrupt:
+            logger.info("Received interrupt signal, shutting down integrated server...")
+            self._shutdown_event.set()
         except Exception as e:
             logger.error(f"Integrated server error: {e}")
             raise
         finally:
             await self.shutdown()
 
-    async def _run_mcp_server(self) -> None:
-        """Run the MCP server in a task."""
+    async def _run_unified_server(self) -> None:
+        """Run both MCP and web servers concurrently on adjacent ports."""
         try:
-            # Use run_async() instead of run() to work within existing event loop
-            await self.mcp_server.app.run_async()
+            # Use adjacent ports: web on configured port, MCP on +1
+            mcp_port = self.config.web_port + 1
+
+            # Determine endpoint path based on transport
+            endpoint_path = "mcp" if self.config.transport == "http" else "sse"
+
+            logger.info(f"🌐 Starting dual server setup ({self.config.transport.upper()} transport)...")
+            logger.info(f"🌍 Web interface: http://{self.config.web_host}:{self.config.web_port}")
+            logger.info(f"📡 MCP server: http://{self.config.web_host}:{mcp_port}/{endpoint_path}/")
+            logger.info(f"📚 API docs: http://{self.config.web_host}:{self.config.web_port}/docs")
+
+            # Create tasks for both servers
+            tasks = []
+
+            # Web server task
+            web_task = asyncio.create_task(self._run_web_server())
+            tasks.append(web_task)
+
+            # MCP server task
+            mcp_task = asyncio.create_task(self._run_mcp_server(mcp_port))
+            tasks.append(mcp_task)
+
+            # Wait for both servers
+            await asyncio.gather(*tasks, return_exceptions=True)
+
         except Exception as e:
-            logger.error(f"MCP server task error: {e}")
+            logger.error(f"❌ Unified server error: {e}")
             self._shutdown_event.set()
             raise
+        finally:
+            logger.info("🔴 Dual server completed")
 
     async def _run_web_server(self) -> None:
         """Run the web server in a task."""
+        logger.info("Starting web server task")
         try:
             if not self.web_app:
                 raise RuntimeError("Web server not initialized")
@@ -285,7 +315,6 @@ class IntegratedPDFKnowledgebaseServer:
             import uvicorn
 
             # Create uvicorn config
-            # Use wsproto for WebSocket to avoid deprecated websockets.legacy warning
             uvicorn_config = uvicorn.Config(
                 app=self.web_app,
                 host=self.config.web_host,
@@ -296,19 +325,30 @@ class IntegratedPDFKnowledgebaseServer:
                 ws="wsproto",  # Use wsproto instead of deprecated websockets
             )
 
-            # Create and run server
             server = uvicorn.Server(uvicorn_config)
-
-            # Start the server
-            logger.info(f"Web server starting on http://{self.config.web_host}:{self.config.web_port}")
-            logger.info(f"API documentation available at http://{self.config.web_host}:{self.config.web_port}/docs")
-
             await server.serve()
 
         except Exception as e:
             logger.error(f"Web server task error: {e}")
             self._shutdown_event.set()
             raise
+        finally:
+            logger.info("Web server task completed")
+
+    async def _run_mcp_server(self, port: int) -> None:
+        """Run the MCP server in a task."""
+        logger.info(f"Starting MCP server task on port {port} with {self.config.transport.upper()} transport")
+        try:
+            # Run the MCP server with the configured transport
+            await self.mcp_server.app.run_http_async(
+                transport=self.config.transport, host=self.config.server_host, port=port, show_banner=True
+            )
+        except Exception as e:
+            logger.error(f"MCP server task error: {e}")
+            self._shutdown_event.set()
+            raise
+        finally:
+            logger.info("MCP server task completed")
 
     async def shutdown(self) -> None:
         """Shutdown both servers gracefully."""
@@ -321,17 +361,11 @@ class IntegratedPDFKnowledgebaseServer:
             # Shutdown background queue first to stop processing new jobs
             if self.background_queue:
                 logger.info("Shutting down background processing queue...")
-                await self.background_queue.shutdown(wait=True)
+                # Use shorter timeout for more responsive shutdown
+                await self.background_queue.shutdown(wait=True, timeout=3.0)
                 logger.info("Background processing queue shutdown complete")
 
-            # Shutdown web server if running
-            if self._web_server_task and not self._web_server_task.done():
-                logger.info("Stopping web server...")
-                self._web_server_task.cancel()
-                try:
-                    await self._web_server_task
-                except asyncio.CancelledError:
-                    pass
+            # No separate web server task in unified mode
 
             # Shutdown MCP server
             if self.mcp_server:

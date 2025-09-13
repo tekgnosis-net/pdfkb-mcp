@@ -29,6 +29,11 @@ class ServerConfig:
     embedding_model: str = "text-embedding-3-large"
     embedding_batch_size: int = 100
 
+    # Transport configuration
+    transport: str = "stdio"  # "stdio" or "http"
+    server_host: str = "localhost"
+    server_port: int = 8000  # Used for both MCP HTTP and web interface
+
     # Embedding provider configuration
     embedding_provider: str = "local"  # "local", "openai", or "huggingface"
 
@@ -131,6 +136,16 @@ class ServerConfig:
     deepinfra_api_key: str = ""  # API key for DeepInfra reranker
     deepinfra_reranker_model: str = "Qwen/Qwen3-Reranker-8B"  # DeepInfra model: 0.6B, 4B, or 8B
 
+    # Document summarization configuration
+    enable_summarizer: bool = False  # Enable/disable document summarization
+    summarizer_provider: str = "local"  # Provider: local or remote
+    summarizer_model: str = "gpt-4"  # Model for summarization (remote) or local model name
+    summarizer_max_pages: int = 10  # Maximum pages to use for summarization
+    summarizer_device: str = ""  # Auto-detect or specific device for local summarizer
+    summarizer_model_cache_dir: str = "~/.cache/pdfkb-mcp/summarizer"  # Cache directory
+    summarizer_api_base: str = ""  # Custom API base URL for remote summarizer
+    summarizer_api_key: str = ""  # API key for remote summarizer (fallback to openai_api_key)
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         # Set cache_dir relative to knowledgebase_path if not explicitly provided
@@ -146,6 +161,10 @@ class ServerConfig:
         # Set whoosh_index_dir if not explicitly provided
         if not self.whoosh_index_dir:
             self.whoosh_index_dir = str(self.cache_dir / "whoosh")
+
+        # Set default summarizer model based on provider if not explicitly set
+        if self.summarizer_model == "gpt-4" and self.summarizer_provider == "local":
+            self.summarizer_model = "Qwen/Qwen3-4B-Instruct-2507-FP8"
 
         self._validate_config()
         self._ensure_directories()
@@ -180,6 +199,17 @@ class ServerConfig:
 
         if self.chunk_overlap < 0:
             raise ConfigurationError("chunk_overlap cannot be negative")
+
+        # Validate transport configuration
+        if self.transport not in ["stdio", "http", "sse"]:
+            raise ConfigurationError("transport must be 'stdio', 'http', or 'sse'")
+
+        # Validate HTTP/SSE configuration
+        if self.transport in ["http", "sse"]:
+            if self.server_port <= 0 or self.server_port > 65535:
+                raise ConfigurationError("server_port must be between 1 and 65535")
+            if not self.server_host:
+                raise ConfigurationError("server_host cannot be empty")
 
         if self.chunk_overlap >= self.chunk_size:
             raise ConfigurationError("chunk_overlap must be less than chunk_size")
@@ -883,6 +913,50 @@ class ServerConfig:
 
         if deepinfra_reranker_model := os.getenv("PDFKB_DEEPINFRA_RERANKER_MODEL"):
             config_kwargs["deepinfra_reranker_model"] = deepinfra_reranker_model
+
+        # Summarization configuration
+        if enable_summarizer := os.getenv("PDFKB_ENABLE_SUMMARIZER"):
+            config_kwargs["enable_summarizer"] = enable_summarizer.lower() in ("true", "1", "yes", "on")
+
+        if summarizer_provider := os.getenv("PDFKB_SUMMARIZER_PROVIDER"):
+            config_kwargs["summarizer_provider"] = summarizer_provider.lower()
+
+        if summarizer_model := os.getenv("PDFKB_SUMMARIZER_MODEL"):
+            config_kwargs["summarizer_model"] = summarizer_model
+
+        if summarizer_max_pages := os.getenv("PDFKB_SUMMARIZER_MAX_PAGES"):
+            try:
+                config_kwargs["summarizer_max_pages"] = int(summarizer_max_pages)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SUMMARIZER_MAX_PAGES: {summarizer_max_pages}")
+
+        if summarizer_device := os.getenv("PDFKB_SUMMARIZER_DEVICE"):
+            config_kwargs["summarizer_device"] = summarizer_device
+
+        if summarizer_model_cache_dir := os.getenv("PDFKB_SUMMARIZER_MODEL_CACHE_DIR"):
+            config_kwargs["summarizer_model_cache_dir"] = summarizer_model_cache_dir
+
+        if summarizer_api_base := os.getenv("PDFKB_SUMMARIZER_API_BASE"):
+            config_kwargs["summarizer_api_base"] = summarizer_api_base
+
+        if summarizer_api_key := os.getenv("PDFKB_SUMMARIZER_API_KEY"):
+            config_kwargs["summarizer_api_key"] = summarizer_api_key
+
+        # Parse transport configuration
+        transport = os.getenv("PDFKB_TRANSPORT")
+        if transport:
+            config_kwargs["transport"] = transport.lower()
+
+        server_host = os.getenv("PDFKB_SERVER_HOST") or os.getenv("PDFKB_SSE_HOST")
+        if server_host:
+            config_kwargs["server_host"] = server_host
+
+        server_port = os.getenv("PDFKB_SERVER_PORT") or os.getenv("PDFKB_SSE_PORT")
+        if server_port:
+            try:
+                config_kwargs["server_port"] = int(server_port)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SERVER_PORT: {server_port}")
 
         return cls(**config_kwargs)
 

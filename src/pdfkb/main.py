@@ -49,6 +49,7 @@ class PDFKnowledgebaseServer:
         self.vector_store: Optional[VectorStore] = None
         self.embedding_service: Optional[EmbeddingService] = None
         self.reranker_service = None
+        self.summarizer_service = None
         self.file_monitor: Optional[FileMonitor] = None
         self.cache_manager: Optional[IntelligentCacheManager] = None
         self.background_queue = background_queue
@@ -94,13 +95,32 @@ class PDFKnowledgebaseServer:
                     logger.warning("Continuing without reranker")
                     self.reranker_service = None
 
+            # Initialize summarizer service if enabled
+            self.summarizer_service = None
+            if self.config.enable_summarizer:
+                try:
+                    from .summarizer_factory import create_summarizer_service
+
+                    self.summarizer_service = create_summarizer_service(self.config)
+                    if self.summarizer_service:
+                        await self.summarizer_service.initialize()
+                        logger.info("Summarizer service initialized successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize summarizer service: {e}")
+                    logger.warning("Continuing without summarizer")
+                    self.summarizer_service = None
+
             self.vector_store = VectorStore(self.config)
             self.vector_store.set_embedding_service(self.embedding_service)
             self.vector_store.set_reranker_service(self.reranker_service)
             await self.vector_store.initialize()
 
             self.document_processor = DocumentProcessor(
-                self.config, self.embedding_service, self.cache_manager, self._embedding_semaphore
+                self.config,
+                self.embedding_service,
+                self.cache_manager,
+                self._embedding_semaphore,
+                self.summarizer_service,
             )
 
             # Log startup configuration summary for diagnostics
@@ -988,8 +1008,33 @@ class PDFKnowledgebaseServer:
         """Run the MCP server."""
         await self.initialize()
 
-        # Use run_async() instead of run() to work within existing event loop
-        await self.app.run_async()
+        if self.config.transport in ["http", "sse"]:
+            transport_name = "HTTP" if self.config.transport == "http" else "SSE"
+            logger.info(
+                f"Running MCP server in {transport_name} mode on {self.config.server_host}:{self.config.server_port}"
+            )
+
+            await self.app.run_http_async(
+                transport=self.config.transport,
+                host=self.config.server_host,
+                port=self.config.server_port,
+                show_banner=True,
+            )
+        else:
+            logger.info("Running MCP server in stdio mode")
+            # Use run_async() instead of run() to work within existing event loop
+            await self.app.run_async()
+
+    def sync_run(self) -> None:
+        """Synchronous wrapper for run() - runs in a separate thread with its own event loop."""
+        logger.info("Starting MCP sync_run in thread")
+        try:
+            asyncio.run(self.run())
+        except Exception as e:
+            logger.error(f"MCP sync_run error: {e}")
+            raise
+        finally:
+            logger.info("MCP sync_run completed in thread")
 
     async def shutdown(self) -> None:
         """Shutdown the server gracefully."""
@@ -1014,6 +1059,7 @@ class PDFKnowledgebaseServer:
 def main():
     """Entry point for the MCP server."""
     import argparse
+    import signal
     import sys
 
     # Parse command line arguments
@@ -1033,15 +1079,35 @@ Environment Variables:
   LOG_LEVEL              Logging level (default: INFO)
 
 Examples:
-  pdfkb-mcp                          # Run with default settings (MCP only, web disabled)
+  pdfkb-mcp                          # Run with default settings (MCP only, stdio transport)
+  pdfkb-mcp --transport http         # Run with HTTP transport (for Cline, modern clients)
+  pdfkb-mcp --transport sse          # Run with SSE transport (for Roo, legacy clients)
   PDFKB_WEB_ENABLE=true pdfkb-mcp    # Run with web interface enabled
   pdfkb-mcp --config myconfig.env    # Use custom config file
+
+Remote Transport:
+  HTTP (modern): http://localhost:8000/mcp/
+  SSE (legacy):  http://localhost:8000/sse/
+
+Integrated Mode:
+  With web enabled, both MCP and web run on adjacent ports:
+  Web: http://localhost:8084/ (web-port, from PDFKB_WEB_PORT)
+  MCP: http://localhost:8085/[mcp|sse]/ (web-port + 1, depends on transport)
+  API Docs: http://localhost:8084/docs
         """,
     )
 
     parser.add_argument("--config", type=str, help="Path to environment configuration file")
 
     parser.add_argument("--port", type=int, help="Override MCP server port (for stdio mode, this has no effect)")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http", "sse"],
+        default="stdio",
+        help="MCP transport mode (default: stdio, use http/sse for remote connections)",
+    )
+    parser.add_argument("--server-host", type=str, help="Host for HTTP transport mode (default: localhost)")
+    parser.add_argument("--server-port", type=int, help="Port for HTTP transport mode (default: 8000)")
 
     parser.add_argument("--enable-web", action="store_true", help="Enable web interface")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Override logging level")
@@ -1060,9 +1126,25 @@ Examples:
     # Load main configuration
     config = ServerConfig.from_env()
 
+    # Log full configuration for debugging
+    logger.info("Loaded configuration details:")
+    for key, value in config.__dict__.items():
+        if isinstance(value, Path):
+            logger.info(f"  {key}: {value}")
+        elif isinstance(value, (list, dict)):
+            logger.info(f"  {key}: {value}")
+        else:
+            logger.info(f"  {key}: {value}")
+
     # Override configuration from command line arguments
     if args.enable_web:
         config.web_enabled = True
+    if args.transport:
+        config.transport = args.transport
+    if getattr(args, "server_host", None):
+        config.server_host = args.server_host
+    if getattr(args, "server_port", None):
+        config.server_port = args.server_port
     if args.log_level:
         config.log_level = args.log_level
 
@@ -1075,6 +1157,15 @@ Examples:
     logger.info(f"Configuration: {config.knowledgebase_path}")
     logger.info(f"Cache directory: {config.cache_dir}")
     logger.info(f"Web interface: {'enabled' if config.web_enabled else 'disabled'}")
+
+    # Set up signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        # This will cause KeyboardInterrupt to be raised in the event loop
+        raise KeyboardInterrupt(f"Signal {signum}")
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     try:
         if config.web_enabled:
@@ -1095,10 +1186,12 @@ Examples:
             server = PDFKnowledgebaseServer(config)
             asyncio.run(server.run())
     except KeyboardInterrupt:
-        logger.info("Received interrupt signal, shutting down...")
+        logger.info("Received interrupt signal, shutting down gracefully...")
     except Exception as e:
         logger.error(f"Server error: {e}")
         sys.exit(1)
+    finally:
+        logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":

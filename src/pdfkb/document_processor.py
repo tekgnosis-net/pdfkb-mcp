@@ -36,6 +36,7 @@ class DocumentProcessor:
         embedding_service: Any,
         cache_manager: Optional[Any] = None,
         embedding_semaphore: Optional[asyncio.Semaphore] = None,
+        summarizer_service: Optional[Any] = None,
     ):
         """Initialize the document processor.
 
@@ -44,11 +45,13 @@ class DocumentProcessor:
             embedding_service: Service for generating embeddings.
             cache_manager: Optional intelligent cache manager for selective processing.
             embedding_semaphore: Optional semaphore to limit concurrent embedding operations.
+            summarizer_service: Optional service for generating document summaries.
         """
         self.config = config
         self.embedding_service = embedding_service
         self.cache_manager = cache_manager
         self.embedding_semaphore = embedding_semaphore or asyncio.Semaphore(1)
+        self.summarizer_service = summarizer_service
         self.parser = self._create_parser()
         self.chunker = self._create_chunker()
 
@@ -639,6 +642,21 @@ class DocumentProcessor:
             combined_markdown = parse_result.get_combined_markdown()
             title = await self._extract_title_from_markdown(file_path, combined_markdown, parse_result.metadata)
             combined_metadata = {**(metadata or {}), **parse_result.metadata}
+
+            # Generate document summary if summarizer is available
+            summary_data = await self._generate_document_summary(parse_result, file_path.name)
+            if summary_data:
+                # Use summarized title if available and better than extracted title
+                if summary_data.title and len(summary_data.title) > 5:  # Basic quality check
+                    title = summary_data.title
+                combined_metadata.update(
+                    {
+                        "short_description": summary_data.short_description,
+                        "long_description": summary_data.long_description,
+                        "summary_generated": True,
+                    }
+                )
+
             document = Document(
                 path=str(file_path),
                 title=title,
@@ -954,6 +972,64 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Failed to generate embeddings: {e}")
             # Don't raise - document can be stored without embeddings
+
+    async def _generate_document_summary(self, parse_result: ParseResult, filename: str) -> Optional[Any]:
+        """Generate document summary using the summarizer service if available.
+
+        Args:
+            parse_result: The parsed document result.
+            filename: Name of the document file.
+
+        Returns:
+            DocumentSummary if summarization is successful, None otherwise.
+        """
+        if not self.summarizer_service:
+            return None
+
+        try:
+            # Get content for summarization (limited by max_pages setting)
+            content_for_summary = self._prepare_content_for_summary(parse_result)
+
+            if not content_for_summary or len(content_for_summary.strip()) < 100:
+                logger.warning(f"Insufficient content for summarization: {filename}")
+                return None
+
+            logger.info(f"→ Generating document summary for: {filename}")
+            summary = await self.summarizer_service.summarize_document(content_for_summary, filename)
+            logger.info("✓ Document summary generated")
+            return summary
+
+        except Exception as e:
+            logger.warning(f"Failed to generate summary for {filename}: {e}")
+            return None
+
+    def _prepare_content_for_summary(self, parse_result: ParseResult) -> str:
+        """Prepare document content for summarization based on max_pages setting.
+
+        Args:
+            parse_result: The parsed document result.
+
+        Returns:
+            Content string limited by max_pages configuration.
+        """
+        max_pages = self.config.summarizer_max_pages
+
+        # Use the first N pages or all pages if less than max_pages
+        pages_to_use = parse_result.pages[:max_pages] if max_pages > 0 else parse_result.pages
+
+        # Combine page content
+        content_parts = []
+        for page in pages_to_use:
+            if page.markdown_content:
+                content_parts.append(f"--- Page {page.page_number} ---\n{page.markdown_content}")
+
+        combined_content = "\n\n".join(content_parts)
+
+        # If no page content available, use combined markdown
+        if not combined_content.strip():
+            combined_content = parse_result.get_combined_markdown()
+
+        return combined_content
 
     async def _calculate_checksum(self, file_path: Path) -> str:
         """Calculate SHA-256 checksum of the file using thread pool execution.
