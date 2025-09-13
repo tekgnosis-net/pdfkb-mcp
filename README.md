@@ -1494,6 +1494,412 @@ Document Type & Priority?
 | `PDFKB_SUMMARIZER_API_BASE` | *optional* | Custom API base URL for remote summarizer |
 | `PDFKB_SUMMARIZER_API_KEY` | *optional* | API key for remote summarizer (fallback to OPENAI_API_KEY) |
 
+## 🐳 Docker Deployment
+
+Deploy pdfkb-mcp using Docker for consistent, scalable, and isolated deployment across any environment.
+
+### Quick Start with Docker
+
+**1. Using Docker Run (Local Embeddings - No API Key Required)**:
+```bash
+# Create directories
+mkdir -p ./documents ./cache ./logs
+
+# Run with local embeddings (no API costs)
+docker run -d \
+  --name pdfkb-mcp \
+  -p 8000:8000 \
+  -v "$(pwd)/documents:/app/documents:rw" \
+  -v "$(pwd)/cache:/app/cache" \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  -e PDFKB_TRANSPORT=http \
+  pdfkb-mcp:latest
+```
+
+**2. Using Docker Compose (Recommended)**:
+```bash
+# Download docker-compose.yml
+curl -O https://raw.githubusercontent.com/juanqui/pdfkb-mcp/main/docker-compose.yml
+
+# Create environment file
+cat > .env << EOF
+PDFKB_DOCUMENTS_PATH=./documents
+PDFKB_CACHE_PATH=./cache
+PDFKB_LOGS_PATH=./logs
+PDFKB_EMBEDDING_PROVIDER=local
+PDFKB_TRANSPORT=http
+PDFKB_LOG_LEVEL=INFO
+EOF
+
+# Start the service
+docker-compose up -d
+```
+
+**3. With OpenAI Embeddings**:
+```bash
+# Add your OpenAI API key to .env
+echo "PDFKB_OPENAI_API_KEY=sk-proj-your-key-here" >> .env
+echo "PDFKB_EMBEDDING_PROVIDER=openai" >> .env
+
+# Restart with new configuration
+docker-compose down && docker-compose up -d
+```
+
+### Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/juanqui/pdfkb-mcp.git
+cd pdfkb-mcp
+
+# Build the Docker image
+docker build -t pdfkb-mcp:latest .
+
+# Or use Docker Compose to build
+docker-compose -f docker-compose.dev.yml build
+```
+
+### Container Configuration
+
+#### Volume Mounts
+
+**Required Volumes**:
+- **Documents**: `/app/documents` - Mount your PDF/Markdown collection here
+- **Cache**: `/app/cache` - Persistent storage for ChromaDB and processing cache
+
+**Optional Volumes**:
+- **Logs**: `/app/logs` - Container logs (useful for debugging)
+- **Config**: `/app/config` - Custom configuration files
+
+```bash
+# Example with all volumes
+docker run -d \
+  --name pdfkb-mcp \
+  -p 8000:8000 -p 8080:8080 \
+  -v "/path/to/your/documents:/app/documents:rw" \
+  -v "pdfkb-cache:/app/cache" \
+  -v "pdfkb-logs:/app/logs" \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  -e PDFKB_WEB_ENABLE=true \
+  pdfkb-mcp:latest
+```
+
+#### Port Configuration
+
+- **8000**: MCP HTTP/SSE transport (required for MCP clients)
+- **8080**: Web interface (optional, only if `PDFKB_WEB_ENABLE=true`)
+
+#### Environment Variables
+
+**Core Configuration**:
+```bash
+# Documents and cache
+PDFKB_KNOWLEDGEBASE_PATH=/app/documents    # Container path (don't change)
+PDFKB_CACHE_DIR=/app/cache                 # Container path (don't change)
+PDFKB_LOG_LEVEL=INFO                       # DEBUG, INFO, WARNING, ERROR
+
+# Transport mode
+PDFKB_TRANSPORT=http                       # "http", "sse" (stdio not recommended for containers)
+PDFKB_SERVER_HOST=0.0.0.0                 # Bind to all interfaces
+PDFKB_SERVER_PORT=8000                     # Port inside container
+
+# Embedding provider
+PDFKB_EMBEDDING_PROVIDER=local             # "local", "openai", "huggingface"
+PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"
+
+# Optional: OpenAI configuration
+PDFKB_OPENAI_API_KEY=sk-proj-your-key-here
+PDFKB_EMBEDDING_MODEL=text-embedding-3-large
+
+# Optional: Web interface
+PDFKB_WEB_ENABLE=false                     # Enable web UI
+PDFKB_WEB_HOST=0.0.0.0                    # Web interface host
+PDFKB_WEB_PORT=8080                       # Web interface port
+```
+
+**Performance Configuration**:
+```bash
+# Processing configuration
+PDFKB_PDF_PARSER=pymupdf4llm              # Parser selection
+PDFKB_DOCUMENT_CHUNKER=langchain           # Chunking strategy
+PDFKB_CHUNK_SIZE=1000                     # Chunk size
+PDFKB_CHUNK_OVERLAP=200                   # Chunk overlap
+
+# Parallel processing (adjust based on container resources)
+PDFKB_MAX_PARALLEL_PARSING=1              # Concurrent PDF processing
+PDFKB_MAX_PARALLEL_EMBEDDING=1            # Concurrent embedding generation
+PDFKB_BACKGROUND_QUEUE_WORKERS=2          # Background workers
+
+# Search configuration
+PDFKB_ENABLE_HYBRID_SEARCH=true           # Hybrid search (recommended)
+PDFKB_ENABLE_RERANKER=false               # Result reranking
+PDFKB_ENABLE_SUMMARIZER=false             # Document summarization
+```
+
+### MCP Client Configuration with Docker
+
+#### For Cline (HTTP Transport)
+
+**MCP Settings (`~/.continue/config.json`)**:
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "command": "curl",
+      "args": [
+        "-X", "POST",
+        "-H", "Content-Type: application/json",
+        "http://localhost:8000/mcp"
+      ],
+      "transport": "http"
+    }
+  }
+}
+```
+
+#### For Roo (SSE Transport)
+
+**Set container to SSE mode**:
+```bash
+# Update docker-compose.yml or add environment variable
+PDFKB_TRANSPORT=sse
+
+# Restart container
+docker-compose restart
+```
+
+**MCP Settings**:
+```json
+{
+  "mcpServers": {
+    "pdfkb": {
+      "transport": "sse",
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+### Docker Compose Configurations
+
+#### Production Configuration
+
+**docker-compose.yml**:
+```yaml
+version: '3.8'
+
+services:
+  pdfkb-mcp:
+    image: pdfkb-mcp:latest
+    container_name: pdfkb-mcp
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"    # MCP transport
+      - "8080:8080"    # Web interface (optional)
+
+    volumes:
+      - "${PDFKB_DOCUMENTS_PATH:-./documents}:/app/documents:rw"
+      - "pdfkb-cache:/app/cache"
+      - "pdfkb-logs:/app/logs"
+
+    environment:
+      - PDFKB_EMBEDDING_PROVIDER=${PDFKB_EMBEDDING_PROVIDER:-local}
+      - PDFKB_TRANSPORT=${PDFKB_TRANSPORT:-http}
+      - PDFKB_LOG_LEVEL=${PDFKB_LOG_LEVEL:-INFO}
+      - PDFKB_WEB_ENABLE=${PDFKB_WEB_ENABLE:-false}
+      - PDFKB_OPENAI_API_KEY=${PDFKB_OPENAI_API_KEY}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+volumes:
+  pdfkb-cache:
+  pdfkb-logs:
+```
+
+#### Development Configuration
+
+**docker-compose.dev.yml**:
+```yaml
+version: '3.8'
+
+services:
+  pdfkb-mcp-dev:
+    build: .
+    container_name: pdfkb-mcp-dev
+
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+
+    volumes:
+      - "./documents:/app/documents:rw"
+      - "./src:/app/src:ro"                    # Live source code mounting
+      - "./dev-cache:/app/cache"
+      - "./dev-logs:/app/logs"
+
+    environment:
+      - PDFKB_LOG_LEVEL=DEBUG                   # Debug logging
+      - PDFKB_WEB_ENABLE=true                   # Enable web interface
+      - PDFKB_EMBEDDING_PROVIDER=local          # No API costs
+
+    env_file:
+      - .env.dev
+```
+
+### Container Management
+
+#### Health Monitoring
+
+```bash
+# Check container health
+docker ps
+docker-compose ps
+
+# View logs
+docker logs pdfkb-mcp
+docker-compose logs -f
+
+# Check health endpoint
+curl http://localhost:8000/health
+
+# Monitor resource usage
+docker stats pdfkb-mcp
+```
+
+#### Container Operations
+
+```bash
+# Start/stop container
+docker-compose up -d
+docker-compose down
+
+# Restart with new configuration
+docker-compose restart
+
+# Update container image
+docker-compose pull
+docker-compose up -d
+
+# View container details
+docker inspect pdfkb-mcp
+
+# Execute commands in container
+docker exec -it pdfkb-mcp bash
+```
+
+### Troubleshooting
+
+#### Common Issues
+
+**1. Permission Errors**:
+```bash
+# Fix volume permissions
+sudo chown -R 1001:1001 ./documents ./cache ./logs
+
+# Or use current user
+sudo chown -R $(id -u):$(id -g) ./documents ./cache ./logs
+```
+
+**2. Port Conflicts**:
+```bash
+# Check if ports are in use
+netstat -tulpn | grep :8000
+lsof -i :8000
+
+# Use different ports
+docker run -p 8001:8000 -p 8081:8080 pdfkb-mcp:latest
+```
+
+**3. Memory Issues**:
+```bash
+# Check container memory usage
+docker stats --no-stream
+
+# Increase memory limits in docker-compose.yml
+deploy:
+  resources:
+    limits:
+      memory: 8G    # Increase memory
+```
+
+**4. Connection Issues**:
+```bash
+# Test container connectivity
+curl http://localhost:8000/health
+
+# Check if container is running
+docker ps | grep pdfkb
+
+# Check logs for errors
+docker logs pdfkb-mcp --tail 50
+```
+
+#### Debug Mode
+
+```bash
+# Run container in debug mode
+docker run -it \
+  -p 8000:8000 \
+  -v "$(pwd)/documents:/app/documents:rw" \
+  -e PDFKB_LOG_LEVEL=DEBUG \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  pdfkb-mcp:latest
+
+# Or use development compose
+docker-compose -f docker-compose.dev.yml up
+```
+
+#### Performance Tuning
+
+**For Low-Memory Systems**:
+```yaml
+environment:
+  - PDFKB_MAX_PARALLEL_PARSING=1
+  - PDFKB_MAX_PARALLEL_EMBEDDING=1
+  - PDFKB_BACKGROUND_QUEUE_WORKERS=1
+  - PDFKB_CHUNK_SIZE=500                      # Smaller chunks
+deploy:
+  resources:
+    limits:
+      memory: 2G                              # Lower memory limit
+```
+
+**For High-Performance Systems**:
+```yaml
+environment:
+  - PDFKB_MAX_PARALLEL_PARSING=4
+  - PDFKB_MAX_PARALLEL_EMBEDDING=2
+  - PDFKB_BACKGROUND_QUEUE_WORKERS=4
+  - PDFKB_CHUNK_SIZE=1500                     # Larger chunks
+deploy:
+  resources:
+    limits:
+      memory: 8G                              # Higher memory limit
+      cpus: '4.0'
+```
+
+### Security Considerations
+
+- **Non-root execution**: Container runs as user `pdfkb` (UID 1001)
+- **Read-only root filesystem**: Container filesystem is read-only except for mounted volumes
+- **Network isolation**: Use Docker networks for service isolation
+- **Resource limits**: Set appropriate CPU/memory limits
+- **Secret management**: Use Docker secrets or environment files for API keys
+
 ## 🖥️ MCP Client Setup
 
 ### Claude Desktop

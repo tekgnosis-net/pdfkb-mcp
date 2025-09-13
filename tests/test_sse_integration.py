@@ -1,9 +1,7 @@
-import asyncio
 import os
 import tempfile
 from pathlib import Path
 
-import httpx
 import pytest
 
 from pdfkb.config import ServerConfig

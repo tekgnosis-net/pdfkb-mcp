@@ -384,20 +384,219 @@ sequenceDiagram
 | Text Only | 20-50ms | Good for keywords | Exact matches |
 | Hybrid (RRF) | 100-150ms | Best overall | Balanced results |
 
+## Docker Deployment Architecture
+
+### Container Design Philosophy
+
+The pdfkb-mcp system is designed with containerization as a first-class deployment option, providing secure, scalable, and maintainable deployment patterns for various environments.
+
+#### Multi-Stage Build Strategy
+
+```mermaid
+graph LR
+    subgraph "Builder Stage"
+        BUILD[Build Dependencies<br/>gcc, python3-dev, git]
+        COMPILE[Compile Packages<br/>PyTorch, ChromaDB]
+        WHEELS[Build Wheels<br/>All Dependencies]
+    end
+
+    subgraph "Runtime Stage"
+        BASE[python:3.11-slim]
+        RUNTIME[Runtime Libraries<br/>libc6, curl]
+        USER[Non-root User<br/>pdfkb:1001]
+        APP[Application Code<br/>Entrypoint Script]
+    end
+
+    BUILD --> COMPILE
+    COMPILE --> WHEELS
+    WHEELS --> APP
+    BASE --> RUNTIME
+    RUNTIME --> USER
+    USER --> APP
+
+    classDef build fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef runtime fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+
+    class BUILD,COMPILE,WHEELS build
+    class BASE,RUNTIME,USER,APP runtime
+```
+
+#### Container Security Model
+
+- **Non-root Execution**: All processes run as dedicated `pdfkb` user (UID 1001)
+- **Read-only Root Filesystem**: Prevents container modification attacks
+- **Minimal Attack Surface**: Only essential system packages included
+- **No Package Managers**: APT/pip removed from final image
+- **Resource Isolation**: Explicit CPU/memory limits via Docker
+
+#### Volume Management Strategy
+
+```mermaid
+graph TB
+    subgraph "Host System"
+        HOST_DOCS["📁 Host Documents<br/>/home/user/documents"]
+        HOST_CACHE["💾 Host Cache<br/>./cache (or named volume)"]
+        HOST_LOGS["📊 Host Logs<br/>./logs"]
+    end
+
+    subgraph "Container"
+        CONT_DOCS["📁 /app/documents<br/>(read-write)"]
+        CONT_CACHE["💾 /app/cache<br/>(read-write)"]
+        CONT_LOGS["📊 /app/logs<br/>(read-write)"]
+        APP["🚀 pdfkb-mcp<br/>Application"]
+    end
+
+    HOST_DOCS --> CONT_DOCS
+    HOST_CACHE --> CONT_CACHE
+    HOST_LOGS --> CONT_LOGS
+
+    CONT_DOCS --> APP
+    CONT_CACHE --> APP
+    CONT_LOGS --> APP
+
+    classDef host fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef container fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+
+    class HOST_DOCS,HOST_CACHE,HOST_LOGS host
+    class CONT_DOCS,CONT_CACHE,CONT_LOGS,APP container
+```
+
+#### Network Architecture
+
+**Port Exposure Patterns:**
+- **8000**: MCP HTTP/SSE transport (configurable)
+- **8080**: Web interface (optional, configurable)
+- **Health Endpoint**: `/health` for container orchestration
+
+**Transport Modes:**
+- **HTTP Mode**: RESTful MCP protocol for modern clients (Cline)
+- **SSE Mode**: Server-Sent Events for legacy clients (Roo)
+- **Stdio Mode**: Standard I/O transport (not recommended for containers)
+
+#### Environment Configuration Management
+
+```yaml
+# Core Configuration Variables
+PDFKB_KNOWLEDGEBASE_PATH: "/app/documents"
+PDFKB_CACHE_DIR: "/app/cache"
+PDFKB_TRANSPORT: "http"  # or "sse"
+PDFKB_SERVER_HOST: "0.0.0.0"
+PDFKB_SERVER_PORT: "8000"
+
+# Embedding Provider Selection
+PDFKB_EMBEDDING_PROVIDER: "local"  # "openai", "huggingface"
+PDFKB_LOCAL_EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
+
+# Feature Toggles
+PDFKB_ENABLE_HYBRID_SEARCH: "true"
+PDFKB_ENABLE_RERANKER: "false"
+PDFKB_WEB_ENABLE: "false"
+```
+
+#### Deployment Patterns
+
+**1. Single Container Deployment**
+```bash
+# Production deployment with local embeddings
+docker run -d \
+  --name pdfkb-mcp \
+  -p 8000:8000 \
+  -v /path/to/documents:/app/documents:ro \
+  -v pdfkb-cache:/app/cache \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  pdfkb-mcp:latest
+```
+
+**2. Docker Compose Deployment**
+```yaml
+# docker-compose.yml with volume mounts and environment
+services:
+  pdfkb-mcp:
+    image: pdfkb-mcp:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - "./documents:/app/documents:rw"
+      - "pdfkb-cache:/app/cache"
+    environment:
+      - PDFKB_TRANSPORT=http
+      - PDFKB_EMBEDDING_PROVIDER=local
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+```
+
+**3. Kubernetes Deployment**
+```yaml
+# k8s deployment with resource limits and health checks
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: pdfkb-mcp
+        image: pdfkb-mcp:latest
+        resources:
+          requests: {memory: "1Gi", cpu: "500m"}
+          limits: {memory: "4Gi", cpu: "2000m"}
+        readinessProbe:
+          httpGet: {path: "/health", port: 8000}
+```
+
+#### Health Monitoring & Diagnostics
+
+**Built-in Health Checks:**
+- **Container Health**: Docker/Kubernetes health probes
+- **Service Health**: MCP server connectivity
+- **Storage Health**: Vector store and cache accessibility
+- **Resource Monitoring**: CPU/memory usage tracking
+
+**Logging Strategy:**
+- **Structured Logging**: JSON format for log aggregation
+- **Log Levels**: Configurable via `PDFKB_LOG_LEVEL`
+- **Performance Metrics**: Request timing and resource usage
+- **Error Tracking**: Detailed error information with stack traces
+
+#### Resource Requirements
+
+| Configuration | CPU | Memory | Storage | Use Case |
+|---------------|-----|--------|---------|----------|
+| Minimal | 0.5 cores | 1 GB | 500 MB | Small document collections |
+| Standard | 1 core | 2 GB | 2 GB | Medium document collections |
+| Performance | 2 cores | 4 GB | 10 GB | Large document collections |
+| Enterprise | 4+ cores | 8+ GB | 50+ GB | Production workloads |
+
+#### Backup and Recovery
+
+**Data Persistence Strategy:**
+- **Documents**: Mount host directories (backup responsibility on host)
+- **Vector Database**: Stored in `/app/cache/chroma` (persistent volume)
+- **Processing Cache**: Stored in `/app/cache/processing` (can be ephemeral)
+- **Configuration**: Environment variables (version controlled)
+
+**Recovery Procedures:**
+1. **Cache Recovery**: Container restart automatically rebuilds cache
+2. **Configuration Recovery**: Environment variables restore settings
+3. **Document Recovery**: Host-based backup/restore of document directories
+4. **Complete Recovery**: Rebuild container with same environment and volumes
+
 ## Scalability Considerations
 
 ### Horizontal Scaling
 - **Stateless Design**: MCP server can be replicated
 - **Shared Storage**: ChromaDB and cache on network storage
 - **Load Balancing**: Multiple server instances behind proxy
+- **Container Orchestration**: Kubernetes-based auto-scaling
 
 ### Vertical Scaling
 - **Parallel Processing**: Configurable worker pools
 - **Batch Operations**: Efficient resource utilization
 - **Memory Management**: Streaming and chunked processing
+- **Resource Limits**: Docker-based CPU/memory constraints
 
 ### Resource Optimization
 - **Adaptive Batch Sizing**: Prevents OOM errors
+- **Container Right-sizing**: Optimal resource allocation
 - **Queue Management**: Priority-based scheduling
 - **Cache Eviction**: LRU policies for memory efficiency
 

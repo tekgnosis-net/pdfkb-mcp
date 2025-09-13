@@ -55,6 +55,59 @@ hatch run test -k "test_embeddings"
 hatch run test -m "not slow"  # Skip slow tests
 ```
 
+## 🔄 Pre-Commit Workflow (CRITICAL)
+
+**ALWAYS follow this checklist before committing and pushing:**
+
+### 1. ✅ **Run Full Test Suite**
+```bash
+hatch run test
+# Must show: "XXX passed, Y skipped, Z warnings" with NO failures
+```
+
+### 2. ✅ **Format Code**
+```bash
+hatch run format
+# Runs Black + isort to ensure consistent formatting
+```
+
+### 3. ✅ **Lint Code**
+```bash
+hatch run lint
+# Must complete with exit code 0 (no errors)
+# Runs: Black check, isort check, flake8
+```
+
+### 4. ✅ **Stage and Commit** (Push Only When Instructed)
+```bash
+git add -A
+git commit -m "meaningful commit message"
+# ONLY push when explicitly instructed:
+# git push origin main
+```
+
+### ⚠️ **Critical Notes:**
+- **Tests MUST pass** - If any test fails, fix it before committing
+- **Lint MUST pass** - Remove unused imports, fix line lengths, etc.
+- **Formatting MUST be applied** - Let Black and isort handle code style
+- **Never skip the checks** - CI will fail if you commit broken code
+
+### 🚨 **Common Pre-Commit Issues:**
+- **Unused imports**: Remove imports that aren't used in the file
+- **Line too long**: Break long lines (>120 chars) across multiple lines
+- **Missing type hints**: Add type annotations for new functions
+- **Test failures**: Fix broken tests before committing
+
+### 📋 **Quick Pre-Commit Command Sequence:**
+```bash
+# The "holy trinity" - run these three commands before every commit:
+hatch run test && hatch run format && hatch run lint
+
+# If all pass, then commit (DON'T auto-push):
+git add -A && git commit -m "your message"
+# Push only when explicitly instructed
+```
+
 ## Configuration and Environment
 
 ### Essential Environment Variables
@@ -244,9 +297,27 @@ PDFKB_WEB_ENABLE=true pdfkb-mcp --transport sse --server-port 8084
 - Version is managed by `bump2version` - never manually change version numbers
 - Only bump version when explicitly requested
 - Version is defined in `src/pdfkb/__init__.py`
+- **Always run full test suite before version bumps**
+
+### Version Bump Workflow:
+```bash
+# 1. Ensure all tests pass and code is clean
+hatch run test && hatch run format && hatch run lint
+
+# 2. Commit any pending changes first
+git add -A && git commit -m "prep for version bump"
+
+# 3. Bump version (creates commit + tag automatically)
+hatch run bump2version minor  # or major/patch
+
+# 4. Push with tags
+git push origin main --tags
+```
 
 ## Important Notes
 
+- **ALWAYS run the pre-commit workflow before pushing** (test + format + lint)
+- **NEVER push automatically unless explicitly instructed** - Always commit first, then ask before pushing
 - Do not run the web server during tests as it's blocking
 - The web interface is **disabled by default** and must be explicitly enabled
 - Local embeddings are the default (no API key required) using Qwen3-Embedding models
@@ -255,3 +326,4 @@ PDFKB_WEB_ENABLE=true pdfkb-mcp --transport sse --server-port 8084
 - Multiple transport modes: stdio (default) and SSE for remote access
 - Background processing queue prevents blocking operations
 - Intelligent caching system minimizes reprocessing on configuration changes
+- **We use Podman instead of Docker** for containerization (all Docker commands should use `podman` instead)
