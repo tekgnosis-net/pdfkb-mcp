@@ -3,7 +3,7 @@
 A Model Context Protocol server for managing PDF documents with vector search capabilities.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from .config import ServerConfig
 
