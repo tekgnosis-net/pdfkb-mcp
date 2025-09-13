@@ -819,73 +819,232 @@ class PDFKnowledgebaseServer:
                 logger.error(f"Unexpected error removing document {document_id}: {e}")
                 return {"success": False, "error": f"Unexpected error: {e}"}
 
+    async def _resolve_document_identifier(self, document_identifier: str) -> Optional[str]:
+        """Resolve a document identifier to an internal document ID.
+
+        Args:
+            document_identifier: Either an internal document ID (doc_xxxxx) or a file path
+
+        Returns:
+            Internal document ID if found, None otherwise
+        """
+        # If it looks like an internal ID, check if it exists directly
+        if document_identifier.startswith("doc_"):
+            if document_identifier in self._document_cache:
+                return document_identifier
+            return None
+
+        # Otherwise, treat as a file path and try to find by path
+        return await self._find_document_by_path(document_identifier)
+
+    async def _find_document_by_path(self, file_path: str) -> Optional[str]:
+        """Find a document by its file path.
+
+        Args:
+            file_path: File path to search for (can be absolute or relative)
+
+        Returns:
+            Internal document ID if found, None otherwise
+        """
+        # Normalize the path
+        path_obj = Path(file_path)
+
+        # If not absolute, resolve against knowledgebase path
+        if not path_obj.is_absolute():
+            path_obj = self.config.knowledgebase_path / path_obj
+
+        # Convert to string for comparison
+        normalized_path = str(path_obj.resolve())
+
+        # Search through document cache
+        for doc_id, document in self._document_cache.items():
+            # Compare resolved paths
+            try:
+                doc_path = Path(document.path).resolve()
+                if str(doc_path) == normalized_path:
+                    return doc_id
+            except Exception:
+                # If path resolution fails, try direct string comparison
+                if document.path == file_path or document.path == str(path_obj):
+                    return doc_id
+
+        return None
+
     def _setup_resources(self) -> None:
         """Set up MCP resources."""
 
-        @self.app.resource("pdf://{document_id}")
-        async def get_document(document_id: str) -> str:
-            """Get a document (PDF or Markdown) by ID.
+        @self.app.resource("doc://{document_identifier}")
+        async def get_document(document_identifier: str) -> str:
+            """Get a document (PDF or Markdown) by ID or file path.
 
             Args:
-                document_id: ID of the document to retrieve.
+                document_identifier: Either an internal document ID (e.g., 'doc_4939b2617e65034a')
+                                   or a file path (e.g., '/app/documents/a121.md' or 'a121.md')
 
             Returns:
                 Document content as JSON string.
             """
             try:
-                if document_id not in self._document_cache:
-                    raise DocumentNotFoundError(document_id)
+                # Resolve the identifier to an internal document ID
+                document_id = await self._resolve_document_identifier(document_identifier)
+
+                if not document_id:
+                    return json.dumps(
+                        {
+                            "error": f"Document not found: {document_identifier}",
+                            "suggestion": "Use doc://list to see all available documents",
+                            "identifier_type": "internal_id" if document_identifier.startswith("doc_") else "file_path",
+                        }
+                    )
 
                 document = self._document_cache[document_id]
                 document_data = document.to_dict(include_chunks=True)
 
-                logger.info(f"Retrieved document: {document_id}")
+                logger.info(f"Retrieved document: {document_identifier} -> {document_id}")
                 return json.dumps(document_data, indent=2)
 
-            except DocumentNotFoundError as e:
-                logger.error(f"Document not found: {e}")
-                return json.dumps({"error": str(e)})
             except Exception as e:
-                logger.error(f"Error retrieving document {document_id}: {e}")
-                return json.dumps({"error": f"Error retrieving document: {e}"})
+                logger.error(f"Error retrieving document {document_identifier}: {e}")
+                return json.dumps(
+                    {
+                        "error": f"Error retrieving document: {e}",
+                        "suggestion": "Use doc://list to see all available documents",
+                    }
+                )
 
-        @self.app.resource("pdf://{document_id}/page/{page_number}")
-        async def get_document_page(document_id: str, page_number: int) -> str:
-            """Get a specific page of a document (PDF only, not applicable to Markdown).
+        @self.app.resource("doc://{document_identifier}/chunk/{chunk_indices}")
+        async def get_document_chunks(document_identifier: str, chunk_indices: str) -> str:
+            """Get specific chunks of a document by chunk index.
 
             Args:
-                document_id: ID of the document.
-                page_number: Page number to retrieve.
+                document_identifier: Either an internal document ID (e.g., 'doc_4939b2617e65034a')
+                                   or a file path (e.g., '/app/documents/a121.md' or 'a121.md')
+                chunk_indices: Chunk index or comma-separated indices (e.g., '0', '1,2,5', '0,3,4,7')
 
             Returns:
-                Page content as text.
+                Chunk content as JSON or plain text for single chunks.
             """
             try:
-                if document_id not in self._document_cache:
-                    raise DocumentNotFoundError(document_id)
+                # Resolve the identifier to an internal document ID
+                document_id = await self._resolve_document_identifier(document_identifier)
+
+                if not document_id:
+                    return json.dumps(
+                        {
+                            "error": f"Document not found: {document_identifier}",
+                            "suggestion": "Use doc://list to see all available documents",
+                            "identifier_type": "internal_id" if document_identifier.startswith("doc_") else "file_path",
+                        }
+                    )
 
                 document = self._document_cache[document_id]
 
-                # Find chunks for the specified page
-                page_chunks = [chunk for chunk in document.chunks if chunk.page_number == page_number]
+                # Parse chunk indices
+                try:
+                    requested_indices = [int(idx.strip()) for idx in chunk_indices.split(",") if idx.strip().isdigit()]
+                    if not requested_indices:
+                        raise ValueError("No valid chunk indices provided")
+                except ValueError as e:
+                    return json.dumps(
+                        {
+                            "error": f"Invalid chunk indices: {chunk_indices}",
+                            "suggestion": "Use comma-separated integers like '0', '1,2,5', or '0,3,4,7'",
+                            "details": str(e),
+                        }
+                    )
 
-                if not page_chunks:
-                    return f"No content found for page {page_number} in document {document_id}"
+                # Get chunks - first try from document, then from vector store if needed
+                chunks_to_search = document.chunks
+                if not chunks_to_search:
+                    try:
+                        chunks_to_search = await self.vector_store.get_document_chunks(document_id)
+                        logger.info(
+                            f"Fetched {len(chunks_to_search)} chunks from vector store for document {document_id}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch chunks from vector store for {document_id}: {e}")
+                        chunks_to_search = []
 
-                # Combine chunk text for the page
-                page_text = "\n\n".join(chunk.text for chunk in page_chunks)
+                if not chunks_to_search:
+                    return json.dumps(
+                        {
+                            "error": f"No chunks found for document {document_identifier}",
+                            "suggestion": "Document may not be processed yet or may have processing errors",
+                        }
+                    )
 
-                logger.info(f"Retrieved page {page_number} from document {document_id}")
-                return page_text
+                # Create a mapping of chunk_index to chunk for efficient lookup
+                chunk_map = {chunk.chunk_index: chunk for chunk in chunks_to_search}
+                max_chunk_index = max(chunk_map.keys()) if chunk_map else -1
 
-            except DocumentNotFoundError as e:
-                logger.error(f"Document not found: {e}")
-                return f"Error: {e}"
+                # Find requested chunks
+                found_chunks = []
+                missing_indices = []
+                for idx in requested_indices:
+                    if idx in chunk_map:
+                        found_chunks.append(chunk_map[idx])
+                    else:
+                        missing_indices.append(idx)
+
+                if not found_chunks:
+                    return json.dumps(
+                        {
+                            "error": f"No chunks found for indices: {requested_indices}",
+                            "available_chunk_count": len(chunks_to_search),
+                            "available_chunk_indices": sorted(chunk_map.keys()),
+                            "max_chunk_index": max_chunk_index,
+                            "suggestion": f"Use chunk indices between 0 and {max_chunk_index}",
+                        }
+                    )
+
+                # Sort chunks by chunk_index for consistent ordering
+                found_chunks.sort(key=lambda c: c.chunk_index)
+
+                # Return format depends on whether single or multiple chunks requested
+                if len(requested_indices) == 1 and len(found_chunks) == 1:
+                    # Single chunk - return plain text
+                    chunk = found_chunks[0]
+                    logger.info(f"Retrieved chunk {chunk.chunk_index} from document {document_identifier}")
+                    return chunk.text
+                else:
+                    # Multiple chunks - return structured JSON
+                    result = {
+                        "document_id": document_id,
+                        "document_identifier": document_identifier,
+                        "requested_indices": requested_indices,
+                        "found_chunks": [
+                            {
+                                "chunk_index": chunk.chunk_index,
+                                "chunk_id": chunk.id,
+                                "text": chunk.text,
+                                "page_number": chunk.page_number,
+                                "metadata": chunk.metadata,
+                            }
+                            for chunk in found_chunks
+                        ],
+                        "total_found": len(found_chunks),
+                    }
+
+                    if missing_indices:
+                        result["missing_indices"] = missing_indices
+                        result["warning"] = f"Some requested chunks were not found: {missing_indices}"
+
+                    logger.info(
+                        f"Retrieved {len(found_chunks)} chunks (indices: {[c.chunk_index for c in found_chunks]}) "
+                        f"from document {document_identifier}"
+                    )
+                    return json.dumps(result, indent=2)
+
             except Exception as e:
-                logger.error(f"Error retrieving page {page_number} from document {document_id}: {e}")
-                return f"Error retrieving page: {e}"
+                logger.error(f"Error retrieving chunks {chunk_indices} from document {document_identifier}: {e}")
+                return json.dumps(
+                    {
+                        "error": f"Error retrieving chunks: {e}",
+                        "suggestion": "Use doc://list to see all available documents",
+                    }
+                )
 
-        @self.app.resource("pdf://list")
+        @self.app.resource("doc://list")
         async def list_all_documents() -> str:
             """List all available documents (PDFs and Markdown files).
 

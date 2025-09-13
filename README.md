@@ -439,9 +439,9 @@ graph LR
 - [`remove_document(document_id)`](src/pdfkb/main.py:488) - Remove document from knowledgebase
 
 **Resources** (Data your client can access):
-- `pdf://{document_id}` - Full document content as JSON
-- `pdf://{document_id}/page/{page_number}` - Specific page content
-- `pdf://list` - List of all documents with metadata
+- `doc://{document_identifier}` - Full document content as JSON (supports both IDs and file paths)
+- `doc://{document_identifier}/chunk/{chunk_indices}` - Specific chunks by index (e.g., '0', '1,2,5', '0,3,4,7')
+- `doc://list` - List of all documents with metadata
 
 ## 🤖 Embedding Options
 

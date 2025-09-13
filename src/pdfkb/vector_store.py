@@ -606,7 +606,7 @@ class VectorStore:
             "document_path": str(document.path),
             "document_title": document.title or document.filename,
             "chunk_index": chunk.chunk_index,
-            "page_number": chunk.page_number or 0,
+            "page_number": chunk.page_number if chunk.page_number is not None else -1,
         }
 
         # Add document metadata (flatten nested structures)
@@ -684,11 +684,23 @@ class VectorStore:
             if key.startswith("chunk_"):
                 chunk_metadata[key[6:]] = value  # Remove "chunk_" prefix
 
+        # Convert page_number to int if present (handles '0' strings and other numeric values)
+        page_number = metadata.get("page_number")
+        if page_number is not None:
+            try:
+                page_number = int(page_number)
+                # Convert our -1 sentinel back to None
+                if page_number == -1:
+                    page_number = None
+            except (ValueError, TypeError):
+                # If conversion fails, use None to indicate no page number
+                page_number = None
+
         return Chunk(
             id=chunk_id,
             document_id=metadata.get("document_id", ""),
             text=text,
-            page_number=metadata.get("page_number"),
+            page_number=page_number,
             chunk_index=metadata.get("chunk_index", 0),
             metadata=chunk_metadata,
         )

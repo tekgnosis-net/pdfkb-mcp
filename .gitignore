@@ -280,6 +280,7 @@ docs/specs/
 $RECYCLE.BIN/
 
 # Samples
+documents/
 samples/
 samples2/
 pdfs/
