@@ -666,6 +666,59 @@ class PDFKnowledgebaseServer:
                 return False
 
         @self.app.tool()
+        async def rescan_documents() -> Dict[str, Any]:
+            """Manually trigger a directory rescan to detect new, modified, or deleted documents.
+
+            This tool is useful when:
+            - Files were added/removed outside of normal monitoring
+            - The automatic monitoring missed changes (e.g., in containerized environments)
+            - You want to force a complete refresh of the document index
+
+            The rescan will:
+            1. Scan the documents directory for all supported files (.pdf, .md, .markdown)
+            2. Compare with the internal file index to detect changes
+            3. Process new and modified files
+            4. Remove deleted files from the knowledgebase
+            5. Return detailed statistics about the operation
+
+            Returns:
+                Detailed scan results including files processed, errors, and timing.
+            """
+            try:
+                if not self.config.enable_manual_rescan:
+                    return {
+                        "success": False,
+                        "error": "Manual rescan is disabled. Set PDFKB_ENABLE_MANUAL_RESCAN=true to enable.",
+                    }
+
+                if not hasattr(self, "file_monitor") or not self.file_monitor:
+                    return {"success": False, "error": "File monitor is not available"}
+
+                logger.info("🔄 Manual document rescan requested via MCP")
+
+                # Perform the manual rescan
+                result = await self.file_monitor.manual_rescan()
+
+                # Update our document cache after rescan
+                await self._populate_document_cache_from_vector_store()
+
+                # Add success flag and format response
+                result["success"] = True
+                result["message"] = (
+                    f"Rescan completed: {result['changes_processed']['new_files_processed']} new, "
+                    f"{result['changes_processed']['modified_files_processed']} modified, "
+                    f"{result['changes_processed']['deleted_files_processed']} deleted files processed"
+                )
+
+                logger.info(f"🔄 Manual document rescan completed: {result['message']}")
+
+                return result
+
+            except Exception as e:
+                logger.error(f"Manual document rescan failed: {e}")
+                return {"success": False, "error": f"Rescan failed: {e}"}
+
+        @self.app.tool()
         async def remove_document(document_id: str) -> Dict[str, Any]:
             """Remove a specific document from the knowledgebase.
 

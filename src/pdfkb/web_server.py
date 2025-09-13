@@ -175,6 +175,9 @@ class IntegratedPDFKnowledgebaseServer:
                 save_cache_callback=self.mcp_server._save_document_cache,
                 background_queue=self.background_queue,
                 lifespan=mcp_lifespan,  # Pass MCP lifespan to web server
+                file_monitor=getattr(
+                    self.mcp_server, "file_monitor", None
+                ),  # Pass file monitor for rescan functionality
             )
 
             # Get the FastAPI app (now created with MCP lifespan integration)

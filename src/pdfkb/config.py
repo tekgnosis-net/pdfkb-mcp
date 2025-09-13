@@ -57,7 +57,9 @@ class ServerConfig:
     huggingface_provider: Optional[str] = None  # Provider like "nebius", None for auto/default
     huggingface_api_key: Optional[str] = None  # HF token, can also use HF_TOKEN env var
     vector_search_k: int = 5
-    file_scan_interval: int = 60
+    file_scan_interval: int = 60  # Directory scan interval in seconds (0 = disabled)
+    enable_periodic_scan: bool = True  # Enable periodic directory scanning as watchdog fallback
+    enable_manual_rescan: bool = True  # Enable manual rescan via MCP command and web UI
     log_level: str = "INFO"
     supported_extensions: List[str] = field(default_factory=lambda: [".pdf", ".md", ".markdown"])
     unstructured_pdf_processing_strategy: str = "fast"
@@ -469,6 +471,15 @@ class ServerConfig:
                 config_kwargs["file_scan_interval"] = int(file_scan_interval)
             except ValueError:
                 raise ConfigurationError(f"Invalid PDFKB_FILE_SCAN_INTERVAL: {file_scan_interval}")
+
+        # Parse file monitoring configuration
+        enable_periodic_scan = os.getenv("PDFKB_ENABLE_PERIODIC_SCAN")
+        if enable_periodic_scan:
+            config_kwargs["enable_periodic_scan"] = enable_periodic_scan.lower() in ["true", "1", "yes", "on"]
+
+        enable_manual_rescan = os.getenv("PDFKB_ENABLE_MANUAL_RESCAN")
+        if enable_manual_rescan:
+            config_kwargs["enable_manual_rescan"] = enable_manual_rescan.lower() in ["true", "1", "yes", "on"]
 
         # Parse optional string settings
         embedding_model = os.getenv("PDFKB_EMBEDDING_MODEL") or os.getenv("EMBEDDING_MODEL")

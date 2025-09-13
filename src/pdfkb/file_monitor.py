@@ -184,6 +184,7 @@ class FileMonitor:
         self.processing_queue = asyncio.Queue()
         self.batch_processor_task: Optional[asyncio.Task] = None
         self.event_processor_task: Optional[asyncio.Task] = None
+        self.periodic_scanner_task: Optional[asyncio.Task] = None
 
         # Processing state
         self.processing_files: Set[str] = set()
@@ -218,6 +219,15 @@ class FileMonitor:
             self.batch_processor_task = asyncio.create_task(self._batch_processor())
             self.event_processor_task = asyncio.create_task(self._event_processor())
 
+            # Start periodic scanner if enabled
+            if self.config.enable_periodic_scan and self.config.file_scan_interval > 0:
+                self.periodic_scanner_task = asyncio.create_task(self._periodic_scanner())
+                logger.info(f"📅 Periodic directory scanner started (interval: {self.config.file_scan_interval}s)")
+            elif not self.config.enable_periodic_scan:
+                logger.info("📅 Periodic directory scanning disabled by configuration")
+            else:
+                logger.info("📅 Periodic directory scanning disabled (interval = 0)")
+
             self.is_running = True
             logger.info(f"File monitor started, watching: {self.config.knowledgebase_path}")
 
@@ -245,6 +255,13 @@ class FileMonitor:
                 self.event_processor_task.cancel()
                 try:
                     await self.event_processor_task
+                except asyncio.CancelledError:
+                    pass
+
+            if self.periodic_scanner_task:
+                self.periodic_scanner_task.cancel()
+                try:
+                    await self.periodic_scanner_task
                 except asyncio.CancelledError:
                     pass
 
@@ -760,8 +777,10 @@ class FileMonitor:
             with self.index_lock:
                 if normalized_path in self.file_index:
                     del self.file_index[normalized_path]
-                    # Create a task to save the file index asynchronously
-                    asyncio.create_task(self.save_file_index())
+
+            # Save the file index synchronously to ensure persistence
+            # This fixes the race condition where async tasks might not complete
+            await self.save_file_index()
 
             # Remove from failed files if present
             self.failed_files.pop(normalized_path, None)
@@ -1204,6 +1223,91 @@ class FileMonitor:
             logger.error(f"Error checking file changes for {file_path}: {e}")
             return True  # Assume changed on error
 
+    async def _periodic_scanner(self) -> None:
+        """Periodically scan the directory for changes as a fallback to watchdog.
+
+        This provides reliable file monitoring in environments where filesystem events
+        don't propagate properly (like Docker on macOS).
+        """
+        try:
+            logger.info(f"📅 Periodic scanner started, scanning every {self.config.file_scan_interval} seconds")
+
+            while self.is_running:
+                try:
+                    await asyncio.sleep(self.config.file_scan_interval)
+
+                    if not self.is_running:
+                        break
+
+                    logger.debug("📅 Periodic scanner: Scanning directory for changes...")
+
+                    # Perform the same logic as startup synchronization
+                    current_files = await self.scan_directory()
+                    cached_files = set(self.file_index.keys())
+
+                    # Normalize paths for comparison
+                    current_file_strs = {str(f.resolve()) for f in current_files}
+                    cached_file_resolved = {str(Path(f).resolve()): f for f in cached_files}
+
+                    # Find new files
+                    new_files = []
+                    for file_path in current_files:
+                        resolved_path = str(file_path.resolve())
+                        if resolved_path not in cached_file_resolved:
+                            new_files.append(file_path)
+
+                    # Find deleted files
+                    deleted_files = []
+                    for cached_file in cached_files:
+                        resolved_cached_path = str(Path(cached_file).resolve())
+                        if resolved_cached_path not in current_file_strs:
+                            deleted_files.append(Path(cached_file))
+
+                    # Find modified files
+                    modified_files = []
+                    for file_path in current_files:
+                        resolved_path = str(file_path.resolve())
+                        if resolved_path in cached_file_resolved:
+                            original_cached_path = cached_file_resolved[resolved_path]
+                            if await self._file_changed(file_path, self.file_index[original_cached_path]):
+                                modified_files.append(file_path)
+
+                    # Log changes if any detected
+                    if new_files or modified_files or deleted_files:
+                        logger.info(
+                            f"📅 Periodic scanner detected changes: {len(new_files)} new, "
+                            f"{len(modified_files)} modified, {len(deleted_files)} deleted"
+                        )
+
+                    # Process new files
+                    for file_path in new_files:
+                        logger.info(f"📅 Periodic scanner: Processing NEW file {file_path}")
+                        await self.process_new_file(file_path)
+
+                    # Process modified files
+                    for file_path in modified_files:
+                        logger.info(f"📅 Periodic scanner: Processing MODIFIED file {file_path}")
+                        await self.process_new_file(file_path)
+
+                    # Process deleted files
+                    for file_path in deleted_files:
+                        logger.info(f"📅 Periodic scanner: Processing DELETED file {file_path}")
+                        await self.remove_file(file_path)
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"📅 Periodic scanner error: {e}")
+                    # Continue running despite errors
+                    await asyncio.sleep(5)  # Brief pause before retrying
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"📅 Periodic scanner failed: {e}")
+        finally:
+            logger.info("📅 Periodic scanner stopped")
+
     def get_processing_stats(self) -> Dict[str, Any]:
         """Get processing statistics.
 
@@ -1236,6 +1340,127 @@ class FileMonitor:
         except Exception as e:
             logger.error(f"Forced rescan failed: {e}")
             raise FileMonitorError(f"Forced rescan failed: {e}", "force_rescan", e)
+
+    async def manual_rescan(self) -> Dict[str, Any]:
+        """Perform a manual directory rescan and return results.
+
+        This is designed to be called from MCP commands and web UI.
+
+        Returns:
+            Dictionary with scan results and statistics.
+        """
+        if not self.config.enable_manual_rescan:
+            raise FileMonitorError("Manual rescan is disabled by configuration", "manual_rescan")
+
+        try:
+            logger.info("🔄 Manual rescan initiated...")
+            start_time = time.time()
+
+            # Perform directory scan
+            current_files = await self.scan_directory()
+            cached_files = set(self.file_index.keys())
+
+            # Normalize paths for comparison
+            current_file_strs = {str(f.resolve()) for f in current_files}
+            cached_file_resolved = {str(Path(f).resolve()): f for f in cached_files}
+
+            # Find changes
+            new_files = []
+            for file_path in current_files:
+                resolved_path = str(file_path.resolve())
+                if resolved_path not in cached_file_resolved:
+                    new_files.append(file_path)
+
+            deleted_files = []
+            for cached_file in cached_files:
+                resolved_cached_path = str(Path(cached_file).resolve())
+                if resolved_cached_path not in current_file_strs:
+                    deleted_files.append(Path(cached_file))
+
+            modified_files = []
+            for file_path in current_files:
+                resolved_path = str(file_path.resolve())
+                if resolved_path in cached_file_resolved:
+                    original_cached_path = cached_file_resolved[resolved_path]
+                    if await self._file_changed(file_path, self.file_index[original_cached_path]):
+                        modified_files.append(file_path)
+
+            logger.info(
+                f"🔄 Manual rescan detected: {len(new_files)} new, "
+                f"{len(modified_files)} modified, {len(deleted_files)} deleted"
+            )
+
+            # Process changes
+            processed_new = 0
+            processed_modified = 0
+            processed_deleted = 0
+            errors = []
+
+            # Process new files
+            for file_path in new_files:
+                try:
+                    logger.info(f"🔄 Manual rescan: Processing NEW file {file_path}")
+                    await self.process_new_file(file_path)
+                    processed_new += 1
+                except Exception as e:
+                    error_msg = f"Failed to process new file {file_path}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+
+            # Process modified files
+            for file_path in modified_files:
+                try:
+                    logger.info(f"🔄 Manual rescan: Processing MODIFIED file {file_path}")
+                    await self.process_new_file(file_path)
+                    processed_modified += 1
+                except Exception as e:
+                    error_msg = f"Failed to process modified file {file_path}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+
+            # Process deleted files
+            for file_path in deleted_files:
+                try:
+                    logger.info(f"🔄 Manual rescan: Processing DELETED file {file_path}")
+                    await self.remove_file(file_path)
+                    processed_deleted += 1
+                except Exception as e:
+                    error_msg = f"Failed to process deleted file {file_path}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+
+            elapsed_time = time.time() - start_time
+
+            result = {
+                "scan_completed": True,
+                "scan_time_seconds": round(elapsed_time, 2),
+                "total_files_scanned": len(current_files),
+                "changes_detected": {
+                    "new_files": len(new_files),
+                    "modified_files": len(modified_files),
+                    "deleted_files": len(deleted_files),
+                },
+                "changes_processed": {
+                    "new_files_processed": processed_new,
+                    "modified_files_processed": processed_modified,
+                    "deleted_files_processed": processed_deleted,
+                },
+                "errors": errors,
+                "current_index_size": len(self.file_index),
+                "timestamp": time.time(),
+            }
+
+            logger.info(
+                f"🔄 Manual rescan completed in {elapsed_time:.2f}s: "
+                f"{processed_new + processed_modified + processed_deleted} files processed, "
+                f"{len(errors)} errors"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"🔄 Manual rescan failed: {e}")
+            raise FileMonitorError(f"Manual rescan failed: {e}", "manual_rescan", e)
 
     def _remove_in_progress_document(self, job_id: str) -> None:
         """Remove in-progress document by job ID."""

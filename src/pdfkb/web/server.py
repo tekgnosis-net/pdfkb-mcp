@@ -54,6 +54,7 @@ class PDFKnowledgebaseWebServer:
         save_cache_callback: Optional[callable] = None,
         background_queue: Optional[BackgroundProcessingQueue] = None,
         lifespan: Optional[Callable] = None,
+        file_monitor: Optional[object] = None,
     ):
         """Initialize the web server.
 
@@ -66,6 +67,7 @@ class PDFKnowledgebaseWebServer:
             save_cache_callback: Optional callback to save document cache
             background_queue: Optional background processing queue
             lifespan: Optional lifespan context manager for FastAPI app
+            file_monitor: Optional file monitor for rescan functionality
         """
         self.config = config
         self.document_processor = document_processor
@@ -75,6 +77,7 @@ class PDFKnowledgebaseWebServer:
         self.save_cache_callback = save_cache_callback
         self.background_queue = background_queue
         self.lifespan = lifespan
+        self._file_monitor = file_monitor
         self.start_time = time.time()
 
         # Initialize WebSocket manager first
@@ -520,6 +523,53 @@ class PDFKnowledgebaseWebServer:
             finally:
                 if client_id:
                     await self.websocket_manager.disconnect(client_id)
+
+        # Document rescan endpoint
+        @self.app.post("/api/documents/rescan", tags=["Documents"])
+        async def rescan_documents() -> Dict[str, Any]:
+            """Manually rescan the documents directory for new/modified/deleted files."""
+            try:
+                # Get file monitor from the parent server if available
+                file_monitor = getattr(self, "_file_monitor", None)
+
+                if not file_monitor:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "File monitor not available. Rescan functionality requires "
+                            "file monitoring to be enabled."
+                        ),
+                    )
+
+                # Trigger manual rescan
+                logger.info("Manual document rescan requested via web API")
+                rescan_result = await file_monitor.manual_rescan()
+
+                # Broadcast rescan completion to connected WebSocket clients
+                await self.websocket_manager.broadcast(
+                    "documents_rescanned",
+                    {
+                        "new_files": rescan_result["new_files"],
+                        "modified_files": rescan_result["modified_files"],
+                        "deleted_files": rescan_result["deleted_files"],
+                        "total_changes": sum(
+                            [
+                                len(rescan_result["new_files"]),
+                                len(rescan_result["modified_files"]),
+                                len(rescan_result["deleted_files"]),
+                            ]
+                        ),
+                    },
+                    "Document library rescanned",
+                )
+
+                return {"success": True, "message": "Document rescan completed successfully", "results": rescan_result}
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to rescan documents: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
         # Additional system endpoints
         @self.app.get("/api/metrics", tags=["System"])

@@ -29,7 +29,7 @@ class PDFKnowledgebaseApp {
         this.apiBaseUrl = '/api';
         this.wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
-        // Theme management
+        // Theme managemen
         this.theme = localStorage.getItem('theme') ||
                     (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
@@ -104,6 +104,12 @@ class PDFKnowledgebaseApp {
         const refreshBtn = document.getElementById('refresh-documents');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => this.loadDocuments(true));
+        }
+
+        // Rescan documents
+        const rescanBtn = document.getElementById('rescan-documents');
+        if (rescanBtn) {
+            rescanBtn.addEventListener('click', () => this.rescanDocuments());
         }
 
         // Upload first document button
@@ -205,7 +211,7 @@ class PDFKnowledgebaseApp {
                 }
                 break;
             case 'search':
-                // Focus search input
+                // Focus search inpu
                 setTimeout(() => {
                     const searchInput = document.getElementById('search-input');
                     if (searchInput) searchInput.focus();
@@ -402,7 +408,7 @@ class PDFKnowledgebaseApp {
      */
 
     /**
-     * Make API request
+     * Make API reques
      */
     async apiRequest(endpoint, options = {}) {
         const url = `${this.apiBaseUrl}${endpoint}`;
@@ -459,7 +465,7 @@ class PDFKnowledgebaseApp {
     }
 
     /**
-     * Load documents list
+     * Load documents lis
      */
     async loadDocuments(force = false) {
         if (this.documents.length > 0 && !force) return;
@@ -534,7 +540,7 @@ class PDFKnowledgebaseApp {
     }
 
     /**
-     * Remove document
+     * Remove documen
      */
     async removeDocument(documentId) {
         try {
@@ -564,7 +570,7 @@ class PDFKnowledgebaseApp {
     }
 
     /**
-     * Upload document
+     * Upload documen
      */
     async uploadDocument(file, metadata = {}) {
         const formData = new FormData();
@@ -604,6 +610,79 @@ class PDFKnowledgebaseApp {
         } catch (error) {
             console.error('Failed to add document by path:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Rescan documents directory for new/modified/deleted files
+     */
+    async rescanDocuments() {
+        const rescanBtn = document.getElementById('rescan-documents');
+
+        try {
+            // Update button state
+            if (rescanBtn) {
+                rescanBtn.disabled = true;
+                rescanBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning">
+                        <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.08 0 2.13.19 3.1.54"/>
+                    </svg>
+                    Rescanning...
+                `;
+            }
+
+            // Show loading toas
+            this.showToast('info', 'Rescanning...', 'Scanning documents directory for changes...');
+
+            // Call rescan API
+            const response = await this.apiRequest('/documents/rescan', {
+                method: 'POST'
+            });
+
+            // Handle successful rescan
+            if (response.success) {
+                const { results } = response;
+                const totalChanges = results.new_files.length + results.modified_files.length + results.deleted_files.length;
+
+                if (totalChanges > 0) {
+                    // Show detailed results
+                    let message = `Found ${totalChanges} changes:`;
+                    if (results.new_files.length > 0) {
+                        message += ` ${results.new_files.length} new`;
+                    }
+                    if (results.modified_files.length > 0) {
+                        message += ` ${results.modified_files.length} modified`;
+                    }
+                    if (results.deleted_files.length > 0) {
+                        message += ` ${results.deleted_files.length} deleted`;
+                    }
+
+                    this.showToast('success', 'Rescan Complete', message);
+
+                    // Refresh the documents list to show changes
+                    await this.loadDocuments(true);
+                } else {
+                    this.showToast('info', 'Rescan Complete', 'No changes detected in documents directory.');
+                }
+            }
+
+        } catch (error) {
+            console.error('Failed to rescan documents:', error);
+            this.showToast('error', 'Rescan Failed', 'Failed to rescan documents. Please try again.');
+        } finally {
+            // Restore button state
+            if (rescanBtn) {
+                rescanBtn.disabled = false;
+                rescanBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v5h5"/>
+                        <path d="M3 8l1.88-1.88a9 9 0 0 1 12.56 0L21 8"/>
+                        <path d="M21 21v-5h-5"/>
+                        <path d="M21 16l-1.88 1.88a9 9 0 0 1-12.56 0L3 16"/>
+                    </svg>
+                    Rescan
+                `;
+            }
         }
     }
 
@@ -699,7 +778,7 @@ class PDFKnowledgebaseApp {
     }
 
     /**
-     * Hide loading and show content
+     * Hide loading and show conten
      */
     showContent(containerId) {
         const baseId = containerId.endsWith('-container') ? containerId.replace(/-container$/, '') : containerId;
@@ -753,7 +832,7 @@ class PDFKnowledgebaseApp {
 
         pagination.classList.remove('hidden');
 
-        // Update pagination text
+        // Update pagination tex
         const start = (response.page - 1) * response.page_size + 1;
         const end = Math.min(start + response.page_size - 1, response.total_count);
 
@@ -820,7 +899,7 @@ class PDFKnowledgebaseApp {
     }
 
     /**
-     * Theme Management
+     * Theme Managemen
      */
 
     /**
@@ -999,7 +1078,7 @@ class PDFKnowledgebaseApp {
     }
 
     /**
-     * Check if an action was recently initiated by this client
+     * Check if an action was recently initiated by this clien
      */
     isClientInitiatedAction(actionType, identifier = null) {
         const key = identifier ? `${actionType}:${identifier}` : actionType;
