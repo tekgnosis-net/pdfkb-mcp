@@ -34,7 +34,7 @@ class TestRemoteSummarizerService:
 
     async def test_initialize(self, remote_summarizer):
         """Test service initialization."""
-        with patch("pdfkb.summarizer_remote.AsyncOpenAI") as mock_openai:
+        with patch("openai.AsyncOpenAI") as mock_openai:
             mock_client = MagicMock()
             mock_openai.return_value = mock_client
 
@@ -56,7 +56,7 @@ class TestRemoteSummarizerService:
         )
         summarizer = RemoteSummarizerService(config)
 
-        with patch("pdfkb.summarizer_remote.AsyncOpenAI") as mock_openai:
+        with patch("openai.AsyncOpenAI") as mock_openai:
             await summarizer.initialize()
 
             mock_openai.assert_called_once_with(api_key="sk-test-key", base_url="https://custom-api.example.com/v1")
@@ -75,7 +75,7 @@ class TestRemoteSummarizerService:
             await summarizer.initialize()
         assert "OpenAI API key required" in str(exc_info.value)
 
-    @patch("pdfkb.summarizer_remote.AsyncOpenAI")
+    @patch("openai.AsyncOpenAI")
     async def test_summarize_document(self, mock_openai_class, remote_summarizer):
         """Test document summarization."""
         # Mock the OpenAI client and response
@@ -84,17 +84,13 @@ class TestRemoteSummarizerService:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[
-            0
-        ].message.content = """
-        {
-            "title": "Machine Learning Fundamentals",
-            "short_description": "An introduction to machine learning concepts and algorithms",
-            "long_description": "This document provides a comprehensive overview of machine learning "
+        mock_response.choices[0].message.content = (
+            '{"title": "Machine Learning Fundamentals", '
+            '"short_description": "An introduction to machine learning concepts and algorithms", '
+            '"long_description": "This document provides a comprehensive overview of machine learning '
             "fundamentals, covering supervised and unsupervised learning, neural networks, "
-            "and practical applications in data science."
-        }
-        """
+            'and practical applications in data science."}'
+        )
 
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
@@ -118,7 +114,7 @@ class TestRemoteSummarizerService:
         assert call_args[1]["temperature"] == 0.3
         assert call_args[1]["max_tokens"] == 1024
 
-    @patch("pdfkb.summarizer_remote.AsyncOpenAI")
+    @patch("openai.AsyncOpenAI")
     async def test_summarize_with_api_error(self, mock_openai_class, remote_summarizer):
         """Test fallback behavior on API error."""
         mock_client = AsyncMock()
@@ -134,7 +130,7 @@ class TestRemoteSummarizerService:
         assert result.title == "test.pdf"
         assert "API error" in result.short_description
 
-    @patch("pdfkb.summarizer_remote.AsyncOpenAI")
+    @patch("openai.AsyncOpenAI")
     async def test_summarize_invalid_json_response(self, mock_openai_class, remote_summarizer):
         """Test handling of invalid JSON response."""
         mock_client = AsyncMock()
@@ -165,7 +161,7 @@ class TestRemoteSummarizerService:
         assert "description" in info
         assert info["max_pages"] == 10  # Default
 
-    @patch("pdfkb.summarizer_remote.AsyncOpenAI")
+    @patch("openai.AsyncOpenAI")
     async def test_test_connection_success(self, mock_openai_class, remote_summarizer):
         """Test connection testing success."""
         mock_client = AsyncMock()
@@ -173,19 +169,16 @@ class TestRemoteSummarizerService:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[
-            0
-        ].message.content = """
-        {
-            "title": "Test Document",
-            "short_description": "A test document",
-            "long_description": "This is a test document for connection validation."
-        }
-        """
+        mock_response.choices[0].message.content = (
+            '{"title": "Test Document", "short_description": "A test document", '
+            '"long_description": "This is a test document for connection validation."}'
+        )
 
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         result = await remote_summarizer.test_connection()
+        # The test_connection method returns bool(title and short_description and long_description)
+        # When all three are truthy strings, it should return True
         assert result is True
 
     @patch("pdfkb.summarizer_remote.RemoteSummarizerService.summarize_document")

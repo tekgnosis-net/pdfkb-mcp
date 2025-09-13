@@ -268,7 +268,7 @@ class RemoteSummarizerService(SummarizerService):
             test_summary = await self.summarize_document(
                 "This is a test document for validating the summarization service.", "test.pdf"
             )
-            return test_summary.title and test_summary.short_description and test_summary.long_description
+            return bool(test_summary.title and test_summary.short_description and test_summary.long_description)
 
         except Exception as e:
             logger.error(f"Remote summarizer service test failed: {e}")
