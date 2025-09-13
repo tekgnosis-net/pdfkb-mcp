@@ -288,3 +288,6 @@ pdfs/
 test_cache
 test_pdfs
 test_env
+
+# Docker
+docker-compose.yml

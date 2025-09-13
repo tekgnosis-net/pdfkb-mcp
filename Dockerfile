@@ -49,42 +49,12 @@ COPY README.md .
 # Install build dependencies and build the package
 RUN pip install --upgrade pip setuptools wheel
 
-# Build package and dependencies
-# Install the package in development mode to build all dependencies
-RUN pip install --no-deps -e .
-RUN pip install --no-cache-dir \
-    # Core MCP and web dependencies
-    "fastmcp>=2.11.1" \
-    "chromadb>=1.0.15" \
-    "openai>=1.99.1" \
-    "watchdog>=6.0.0" \
-    "python-dotenv>=0.9.9" \
-    "fastapi>=0.104.0" \
-    "uvicorn[standard]>=0.24.0" \
-    "wsproto>=1.2.0" \
-    "python-multipart>=0.0.6" \
-    "websockets>=12.0" \
-    "pydantic>=2.5.0" \
-    # Default parser and chunker for OOTB experience
-    "pymupdf4llm>=0.0.27" \
-    "PyMuPDF>=1.26.3" \
-    "langchain-text-splitters>=0.3.9" \
-    # Local embeddings (default, no API key required)
-    "torch>=2.0.0" \
-    "transformers>=4.55.0" \
-    "accelerate>=0.24.0" \
-    "safetensors>=0.4.0" \
-    "huggingface-hub>=0.19.0" \
-    "gguf>=0.17.0" \
-    # Hybrid search support (included by default)
-    "whoosh>=2.7.4" \
-    # HTTP client for APIs
-    "aiohttp>=3.9.0" \
-    # Essential system utilities
-    "psutil>=6.0.0"
+# Install the package with all dependencies from pyproject.toml
+# This eliminates the need to manually specify dependencies in the Dockerfile
+RUN pip install --no-cache-dir -e .
 
 # Build wheels for all dependencies to use in runtime stage
-RUN pip wheel --wheel-dir /build/wheels -r <(pip freeze)
+RUN pip freeze > requirements.txt && pip wheel --wheel-dir /build/wheels -r requirements.txt
 
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
@@ -118,8 +88,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     # Clean up package cache
     && rm -rf /var/lib/apt/lists/* \
-    # Remove package manager to reduce attack surface
-    && apt-get purge -y --auto-remove apt \
     && rm -rf /var/cache/apt/archives/*
 
 # Create non-root user for security
