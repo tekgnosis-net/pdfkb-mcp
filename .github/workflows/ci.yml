@@ -1,20 +1,32 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
     branches: [ main, develop ]
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  test:
+  # Always run: Test, lint, and build Python package
+  test-and-build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+    outputs:
+      is-release: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Needed for proper git history
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
@@ -44,6 +56,7 @@ jobs:
         hatch run test-cov
 
     - name: Upload coverage to Codecov
+      if: matrix.python-version == '3.11'  # Only upload once
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
@@ -51,39 +64,155 @@ jobs:
         name: codecov-umbrella
         fail_ci_if_error: false
 
-  build:
-    runs-on: ubuntu-latest
-    needs: test
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-
-    - name: Set up pip cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-
-    - name: Install Hatch
-      run: pip install --upgrade hatch
-
+    # Only build package artifacts once (Python 3.11)
     - name: Build package
+      if: matrix.python-version == '3.11'
       run: hatch build
 
     - name: Check package metadata
+      if: matrix.python-version == '3.11'
       run: |
         pip install twine
         twine check dist/*
 
     - name: Upload build artifacts
+      if: matrix.python-version == '3.11'
       uses: actions/upload-artifact@v4
       with:
         name: dist
         path: dist/
+        retention-days: 7
+
+  # Always run: Build Docker image (push only on tags)
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # For artifact attestation
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Needed for proper git history
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract Docker metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          # Latest tag for main branch pushes (not tags)
+          type=raw,value=latest,enable={{is_default_branch}}
+          # Branch-based tags for development
+          type=ref,event=branch,enable=${{ !startsWith(github.ref, 'refs/tags/v') }}
+          # PR-based tags
+          type=ref,event=pr
+          # Version tags (only for releases)
+          type=ref,event=tag
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+        labels: |
+          org.opencontainers.image.title=pdfkb-mcp
+          org.opencontainers.image.description=PDF Knowledgebase MCP Server - Document search with vector embeddings
+          org.opencontainers.image.source=https://github.com/juanqui/pdfkb-mcp
+          org.opencontainers.image.licenses=MIT
+          org.opencontainers.image.authors=Juan Villa <juanqui@villafam.com>
+
+    - name: Build and conditionally push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        # Push only on: 1) version tags, 2) main branch pushes
+        push: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          PDFKB_VERSION=${{ github.ref_name }}
+          BUILD_DATE=${{ steps.meta.outputs.created }}
+          VCS_REF=${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Generate artifact attestation
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/attest-build-provenance@v1
+      with:
+        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+        subject-digest: ${{ steps.build.outputs.digest }}
+        push-to-registry: true
+
+    - name: Output Docker build details
+      run: |
+        echo "🐳 Docker image built successfully!"
+        echo "📋 Image tags:"
+        echo "${{ steps.meta.outputs.tags }}" | sed 's/^/  - /'
+        echo ""
+        if [[ "${{ startsWith(github.ref, 'refs/tags/v') }}" == "true" ]]; then
+          echo "🚀 RELEASE: Image pushed to registry with version tags"
+          echo "💾 Image digest: ${{ steps.build.outputs.digest }}"
+        elif [[ "${{ github.ref }}" == "refs/heads/main" && "${{ github.event_name }}" == "push" ]]; then
+          echo "🚀 MAIN: Image pushed to registry as 'latest'"
+          echo "💾 Image digest: ${{ steps.build.outputs.digest }}"
+        else
+          echo "ℹ️  Image built but not pushed (development/PR)"
+        fi
+
+  # Only on version tags: Publish to PyPI and create GitHub release
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [test-and-build, docker-build]
+    permissions:
+      contents: write
+      id-token: write  # For PyPI trusted publishing
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/*
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+    - name: Output release details
+      run: |
+        echo "🎉 Release ${{ github.ref_name }} published successfully!"
+        echo "📦 PyPI: https://pypi.org/project/pdfkb-mcp/${{ github.ref_name }}/"
+        echo "🐳 Docker: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}"
+        echo "📋 GitHub: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
