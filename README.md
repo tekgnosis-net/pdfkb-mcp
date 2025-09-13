@@ -1500,12 +1500,22 @@ Deploy pdfkb-mcp using Docker for consistent, scalable, and isolated deployment 
 
 ### Quick Start with Docker
 
-**1. Using Docker Run (Local Embeddings - No API Key Required)**:
+**1. Using Container Run (Local Embeddings - No API Key Required)**:
 ```bash
 # Create directories
 mkdir -p ./documents ./cache ./logs
 
-# Run with local embeddings (no API costs)
+# Run with Podman (preferred)
+podman run -d \
+  --name pdfkb-mcp \
+  -p 8000:8000 \
+  -v "$(pwd)/documents:/app/documents:rw" \
+  -v "$(pwd)/cache:/app/cache" \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  -e PDFKB_TRANSPORT=http \
+  pdfkb-mcp:latest
+
+# Or with Docker
 docker run -d \
   --name pdfkb-mcp \
   -p 8000:8000 \
@@ -1516,33 +1526,81 @@ docker run -d \
   pdfkb-mcp:latest
 ```
 
-**2. Using Docker Compose (Recommended)**:
+**2. Using Compose (Recommended: Podman)**:
 ```bash
-# Download docker-compose.yml
-curl -O https://raw.githubusercontent.com/juanqui/pdfkb-mcp/main/docker-compose.yml
+# 1) Copy the sample file and edit it
+cp docker-compose.sample.yml docker-compose.yml
 
-# Create environment file
-cat > .env << EOF
-PDFKB_DOCUMENTS_PATH=./documents
-PDFKB_CACHE_PATH=./cache
-PDFKB_LOGS_PATH=./logs
-PDFKB_EMBEDDING_PROVIDER=local
-PDFKB_TRANSPORT=http
-PDFKB_LOG_LEVEL=INFO
+# 2) Edit docker-compose.yml
+#    - Set the documents volume path to your folder
+#    - Optionally adjust ports, resources, and any env vars
+$EDITOR docker-compose.yml
+
+# 3) Create recommended local directories (if using bind mounts)
+mkdir -p ./documents ./cache ./logs
+
+# 4a) Start with Podman (preferred per project rules)
+podman-compose up -d
+
+# 4b) Or with Docker (if you aren't using Podman)
+docker compose up -d
+```
+> Security note: docker-compose.yml is already in .gitignore. Do not commit API keys. Use the sample file and keep your local docker-compose.yml untracked.
+
+### Docker Compose Configuration
+
+The `docker-compose.sample.yml` provides a comprehensive configuration template with:
+
+- 📋 **All environment variables** documented with examples and default values
+- 🔧 **Logical sections** (Core, Embedding, Web Interface, Processing, Advanced AI, etc.)
+- 🚀 **Multiple configuration examples** for different use cases
+- 🔒 **Security best practices** with no committed API keys
+- 🎯 **Quick start recommendations** at the bottom of the file
+
+**Key Configuration Areas**:
+
+1. **Documents Volume**: Update the path to your document collection:
+   ```yaml
+   volumes:
+     - "/path/to/your/documents:/app/documents:rw"  # ← CHANGE THIS
+   ```
+
+2. **Embedding Provider**: Choose your preferred option in the environment section:
+   ```yaml
+   # Local (no API key - recommended for privacy)
+   PDFKB_EMBEDDING_PROVIDER: "local"
+
+   # OpenAI/compatible APIs (requires API key)
+   # PDFKB_EMBEDDING_PROVIDER: "openai"
+   # PDFKB_OPENAI_API_KEY: "YOUR-API-KEY-HERE"
+   ```
+
+3. **Resource Limits**: Adjust based on your system:
+   ```yaml
+   deploy:
+     resources:
+       limits:
+         cpus: '4.0'    # ← Increase for better performance
+         memory: 8G     # ← Increase for large document collections
+   ```
+
+**3. Alternative: Using Environment File**:
+For sensitive configuration, create a separate `.env` file:
+```bash
+# Create .env file for sensitive settings
+cat > .env << 'EOF'
+PDFKB_OPENAI_API_KEY=sk-proj-your-actual-key-here
+PDFKB_EMBEDDING_PROVIDER=openai
+PDFKB_DEEPINFRA_API_KEY=your-deepinfra-key
+PDFKB_ENABLE_RERANKER=true
 EOF
 
-# Start the service
-docker-compose up -d
-```
-
-**3. With OpenAI Embeddings**:
-```bash
-# Add your OpenAI API key to .env
-echo "PDFKB_OPENAI_API_KEY=sk-proj-your-key-here" >> .env
-echo "PDFKB_EMBEDDING_PROVIDER=openai" >> .env
+# Reference in docker-compose.yml
+# env_file:
+#   - .env
 
 # Restart with new configuration
-docker-compose down && docker-compose up -d
+podman-compose down && podman-compose up -d
 ```
 
 ### Building from Source
@@ -1552,11 +1610,20 @@ docker-compose down && docker-compose up -d
 git clone https://github.com/juanqui/pdfkb-mcp.git
 cd pdfkb-mcp
 
-# Build the Docker image
-docker build -t pdfkb-mcp:latest .
+# Copy and customize the configuration
+cp docker-compose.sample.yml docker-compose.yml
+# Edit docker-compose.yml to update volumes and configuration
+$EDITOR docker-compose.yml
 
-# Or use Docker Compose to build
-docker-compose -f docker-compose.dev.yml build
+# Build with Podman (preferred)
+podman build -t pdfkb-mcp:latest .
+
+# Or use Podman Compose to build
+podman-compose build
+
+# Alternative: Build with Docker
+docker build -t pdfkb-mcp:latest .
+docker compose build
 ```
 
 ### Container Configuration
@@ -1572,7 +1639,18 @@ docker-compose -f docker-compose.dev.yml build
 - **Config**: `/app/config` - Custom configuration files
 
 ```bash
-# Example with all volumes
+# Example with all volumes (Podman preferred)
+podman run -d \
+  --name pdfkb-mcp \
+  -p 8000:8000 -p 8080:8080 \
+  -v "/path/to/your/documents:/app/documents:rw" \
+  -v "pdfkb-cache:/app/cache" \
+  -v "pdfkb-logs:/app/logs" \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  -e PDFKB_WEB_ENABLE=true \
+  pdfkb-mcp:latest
+
+# Or with Docker
 docker run -d \
   --name pdfkb-mcp \
   -p 8000:8000 -p 8080:8080 \
@@ -1664,8 +1742,11 @@ PDFKB_ENABLE_SUMMARIZER=false             # Document summarization
 # Update docker-compose.yml or add environment variable
 PDFKB_TRANSPORT=sse
 
-# Restart container
-docker-compose restart
+# Restart container with Podman
+podman-compose restart
+
+# Or with Docker
+docker compose restart
 ```
 
 **MCP Settings**:
@@ -1680,55 +1761,21 @@ docker-compose restart
 }
 ```
 
-### Docker Compose Configurations
+### Production Configuration
 
-#### Production Configuration
+For production deployments, use the comprehensive `docker-compose.sample.yml` as your starting point:
 
-**docker-compose.yml**:
-```yaml
-version: '3.8'
+1. **Copy and customize**: `cp docker-compose.sample.yml docker-compose.yml`
+2. **Update paths and secrets**: Edit the documents volume and any API keys
+3. **Adjust resource limits**: Configure CPU/memory based on your infrastructure
+4. **Enable security features**: Review security settings and network configuration
 
-services:
-  pdfkb-mcp:
-    image: pdfkb-mcp:latest
-    container_name: pdfkb-mcp
-    restart: unless-stopped
-
-    ports:
-      - "8000:8000"    # MCP transport
-      - "8080:8080"    # Web interface (optional)
-
-    volumes:
-      - "${PDFKB_DOCUMENTS_PATH:-./documents}:/app/documents:rw"
-      - "pdfkb-cache:/app/cache"
-      - "pdfkb-logs:/app/logs"
-
-    environment:
-      - PDFKB_EMBEDDING_PROVIDER=${PDFKB_EMBEDDING_PROVIDER:-local}
-      - PDFKB_TRANSPORT=${PDFKB_TRANSPORT:-http}
-      - PDFKB_LOG_LEVEL=${PDFKB_LOG_LEVEL:-INFO}
-      - PDFKB_WEB_ENABLE=${PDFKB_WEB_ENABLE:-false}
-      - PDFKB_OPENAI_API_KEY=${PDFKB_OPENAI_API_KEY}
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
-
-volumes:
-  pdfkb-cache:
-  pdfkb-logs:
-```
+The sample file includes:
+- 🔒 **Security hardening** (non-root user, no-new-privileges)
+- 📊 **Resource limits** and health checks
+- 🌐 **Network isolation**
+- 📋 **Comprehensive environment variable documentation**
+- 🚀 **Performance optimization examples**
 
 #### Development Configuration
 
@@ -1765,40 +1812,48 @@ services:
 #### Health Monitoring
 
 ```bash
-# Check container health
+# Check container health (Podman preferred)
+podman ps
+podman-compose ps
+
+# Or with Docker
 docker ps
-docker-compose ps
+docker compose ps
 
 # View logs
-docker logs pdfkb-mcp
-docker-compose logs -f
+podman logs pdfkb-mcp      # or: docker logs pdfkb-mcp
+podman-compose logs -f     # or: docker compose logs -f
 
 # Check health endpoint
 curl http://localhost:8000/health
 
 # Monitor resource usage
-docker stats pdfkb-mcp
+podman stats pdfkb-mcp     # or: docker stats pdfkb-mcp
 ```
 
 #### Container Operations
 
 ```bash
-# Start/stop container
-docker-compose up -d
-docker-compose down
+# Start/stop container (Podman preferred)
+podman-compose up -d
+podman-compose down
+
+# Or with Docker
+docker compose up -d
+docker compose down
 
 # Restart with new configuration
-docker-compose restart
+podman-compose restart     # or: docker compose restart
 
 # Update container image
-docker-compose pull
-docker-compose up -d
+podman-compose pull        # or: docker compose pull
+podman-compose up -d       # or: docker compose up -d
 
 # View container details
-docker inspect pdfkb-mcp
+podman inspect pdfkb-mcp   # or: docker inspect pdfkb-mcp
 
 # Execute commands in container
-docker exec -it pdfkb-mcp bash
+podman exec -it pdfkb-mcp bash   # or: docker exec -it pdfkb-mcp bash
 ```
 
 ### Troubleshooting
@@ -1821,13 +1876,14 @@ netstat -tulpn | grep :8000
 lsof -i :8000
 
 # Use different ports
-docker run -p 8001:8000 -p 8081:8080 pdfkb-mcp:latest
+podman run -p 8001:8000 -p 8081:8080 pdfkb-mcp:latest   # Podman
+# or: docker run -p 8001:8000 -p 8081:8080 pdfkb-mcp:latest  # Docker
 ```
 
 **3. Memory Issues**:
 ```bash
 # Check container memory usage
-docker stats --no-stream
+podman stats --no-stream   # or: docker stats --no-stream
 
 # Increase memory limits in docker-compose.yml
 deploy:
@@ -1842,16 +1898,24 @@ deploy:
 curl http://localhost:8000/health
 
 # Check if container is running
-docker ps | grep pdfkb
+podman ps | grep pdfkb     # or: docker ps | grep pdfkb
 
 # Check logs for errors
-docker logs pdfkb-mcp --tail 50
+podman logs pdfkb-mcp --tail 50   # or: docker logs pdfkb-mcp --tail 50
 ```
 
 #### Debug Mode
 
 ```bash
-# Run container in debug mode
+# Run container in debug mode (Podman preferred)
+podman run -it \
+  -p 8000:8000 \
+  -v "$(pwd)/documents:/app/documents:rw" \
+  -e PDFKB_LOG_LEVEL=DEBUG \
+  -e PDFKB_EMBEDDING_PROVIDER=local \
+  pdfkb-mcp:latest
+
+# Or with Docker
 docker run -it \
   -p 8000:8000 \
   -v "$(pwd)/documents:/app/documents:rw" \
@@ -1859,8 +1923,8 @@ docker run -it \
   -e PDFKB_EMBEDDING_PROVIDER=local \
   pdfkb-mcp:latest
 
-# Or use development compose
-docker-compose -f docker-compose.dev.yml up
+# Use development compose
+podman-compose -f docker-compose.dev.yml up   # or: docker compose -f docker-compose.dev.yml up
 ```
 
 #### Performance Tuning

@@ -1,0 +1,402 @@
+# Docker Compose Sample Configuration for pdfkb-mcp MCP Server
+# Copy this file to docker-compose.yml and customize the configuration for your environment
+
+version: '3.8'
+
+services:
+  pdfkb-mcp:
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🔧 IMAGE & CONTAINER CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    # Use the latest pdfkb-mcp image (replace with specific version if needed)
+    image: pdfkb-mcp:latest
+
+    # Uncomment to build from source instead:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     PDFKB_VERSION: ${PDFKB_VERSION:-latest}
+
+    container_name: pdfkb-mcp-server
+    restart: unless-stopped
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🌐 PORT CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    ports:
+      # Web interface port (when PDFKB_WEB_ENABLE=true)
+      - "8000:8000"
+
+      # MCP server port (HTTP/SSE transport)
+      - "8001:8001"
+
+      # Alternative web port mapping (optional)
+      # - "8082:8082"
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 💾 VOLUME MOUNTS
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    volumes:
+      # 📁 Documents Directory - Mount your PDF/Markdown collection here
+      # CHANGE THIS PATH to point to your documents folder
+      - "/path/to/your/documents:/app/documents:rw"
+
+      # 💽 Cache Directory - Persistent storage for ChromaDB, embeddings, and processing cache
+      - "pdfkb-cache:/app/cache"
+
+      # 📋 Logs Directory - Container logs (optional)
+      - "pdfkb-logs:/app/logs"
+
+      # ⚙️  Configuration Directory - Custom config files (optional)
+      # - "${PDFKB_CONFIG_PATH:-./config}:/app/config:ro"
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🔧 ENVIRONMENT CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    environment:
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🏠 CORE PATHS & STORAGE                                                              │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # Path to your document collection inside the container
+      PDFKB_KNOWLEDGEBASE_PATH: "/app/documents"
+
+      # Cache directory for ChromaDB, processing cache, and vector storage
+      PDFKB_CACHE_DIR: "/app/cache"
+
+      # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+      PDFKB_LOG_LEVEL: "${PDFKB_LOG_LEVEL:-INFO}"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🌐 TRANSPORT & SERVER CONFIGURATION                                                  │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # Transport mode: stdio (default), http, sse
+      PDFKB_TRANSPORT: "${PDFKB_TRANSPORT:-http}"
+
+      # Server host (for HTTP/SSE transport)
+      PDFKB_SERVER_HOST: "0.0.0.0"
+
+      # Server port (for HTTP/SSE transport)
+      PDFKB_SERVER_PORT: "8001"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🧠 EMBEDDING CONFIGURATION                                                           │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ EMBEDDING PROVIDER ━━━
+      # Choose: "local", "openai", "huggingface"
+      PDFKB_EMBEDDING_PROVIDER: "local"
+
+      # ━━━ LOCAL EMBEDDINGS (No API key required - runs entirely offline) ━━━
+      # Recommended local models:
+      # - Qwen/Qwen3-Embedding-0.6B (lightweight, good quality)
+      # - Qwen/Qwen3-Embedding-8B (high quality, more resource intensive)
+      PDFKB_LOCAL_EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
+      PDFKB_LOCAL_EMBEDDING_BATCH_SIZE: "32"
+      PDFKB_EMBEDDING_DEVICE: ""  # Auto-detect: "", or specify: "cpu", "cuda", "mps"
+      PDFKB_EMBEDDING_CACHE_SIZE: "10000"
+      PDFKB_MAX_SEQUENCE_LENGTH: "512"
+      PDFKB_USE_MODEL_OPTIMIZATION: "false"  # Disabled due to torch.compile issues
+      PDFKB_MODEL_CACHE_DIR: "~/.cache/pdfkb-mcp/models"
+      PDFKB_EMBEDDING_DIMENSION: "0"  # 0 = use model default
+      PDFKB_GGUF_QUANTIZATION: "Q6_K"  # GGUF quantization: Q8_0, F16, Q6_K, Q4_K_M
+      PDFKB_FALLBACK_TO_OPENAI: "false"
+
+      # ━━━ OPENAI / OPENAI-COMPATIBLE EMBEDDINGS ━━━
+      # Set these if using PDFKB_EMBEDDING_PROVIDER="openai"
+      # PDFKB_OPENAI_API_KEY: "sk-YOUR-OPENAI-API-KEY-HERE"
+      # PDFKB_OPENAI_API_BASE: ""  # Leave empty for OpenAI, or set custom endpoint (e.g., DeepInfra)
+      # PDFKB_EMBEDDING_MODEL: "text-embedding-3-large"  # OpenAI model
+      # PDFKB_EMBEDDING_BATCH_SIZE: "100"
+
+      # ━━━ EXAMPLE: DeepInfra (OpenAI-compatible) ━━━
+      # PDFKB_EMBEDDING_PROVIDER: "openai"
+      # PDFKB_OPENAI_API_KEY: "YOUR-DEEPINFRA-API-KEY"
+      # PDFKB_OPENAI_API_BASE: "https://api.deepinfra.com/v1"
+      # PDFKB_EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-8B"
+
+      # ━━━ HUGGINGFACE EMBEDDINGS ━━━
+      # Set these if using PDFKB_EMBEDDING_PROVIDER="huggingface"
+      # HF_TOKEN: "hf_YOUR-HUGGINGFACE-TOKEN-HERE"
+      # PDFKB_HUGGINGFACE_EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+      # PDFKB_HUGGINGFACE_PROVIDER: ""  # Optional provider like "nebius"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🌐 WEB INTERFACE CONFIGURATION                                                       │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # Enable web interface (default: false)
+      PDFKB_WEB_ENABLE: "true"
+
+      # Web interface host and port
+      PDFKB_WEB_HOST: "0.0.0.0"
+      PDFKB_WEB_PORT: "8000"
+
+      # CORS origins for web interface (comma-separated)
+      PDFKB_WEB_CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 📄 DOCUMENT PROCESSING CONFIGURATION                                                │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ PDF PARSER SELECTION ━━━
+      # Choose: "pymupdf4llm" (default), "marker", "docling", "mineru", "unstructured", "llm"
+      PDFKB_PDF_PARSER: "${PDFKB_PDF_PARSER:-pymupdf4llm}"
+
+      # ━━━ DOCUMENT CHUNKER SELECTION ━━━
+      # Choose: "langchain" (default), "semantic", "page", "unstructured"
+      PDFKB_DOCUMENT_CHUNKER: "${PDFKB_DOCUMENT_CHUNKER:-langchain}"
+
+      # ━━━ CHUNKING PARAMETERS ━━━
+      PDFKB_CHUNK_SIZE: "${PDFKB_CHUNK_SIZE:-1000}"
+      PDFKB_CHUNK_OVERLAP: "${PDFKB_CHUNK_OVERLAP:-200}"
+      PDFKB_MIN_CHUNK_SIZE: "0"  # Global minimum chunk size (0 = disabled)
+
+      # ━━━ SUPPORTED FILE EXTENSIONS ━━━
+      # Automatically detected: .pdf, .md, .markdown
+
+      # ━━━ MARKDOWN-SPECIFIC CONFIGURATION ━━━
+      PDFKB_MARKDOWN_PARSE_FRONTMATTER: "true"  # Parse YAML/TOML frontmatter
+      PDFKB_MARKDOWN_EXTRACT_TITLE: "true"      # Extract title from first H1
+      PDFKB_MARKDOWN_PAGE_BOUNDARY_PATTERN: "--\\[PAGE:\\s*(\\d+)\\]--"  # Page pattern
+      PDFKB_MARKDOWN_SPLIT_ON_PAGE_BOUNDARIES: "true"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🔍 SEARCH & RETRIEVAL CONFIGURATION                                                 │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ HYBRID SEARCH (Vector + BM25) ━━━
+      PDFKB_ENABLE_HYBRID_SEARCH: "true"
+      PDFKB_HYBRID_VECTOR_WEIGHT: "0.6"        # Semantic search weight
+      PDFKB_HYBRID_TEXT_WEIGHT: "0.4"          # BM25 search weight
+      PDFKB_RRF_K: "60"                        # RRF constant parameter
+      PDFKB_HYBRID_EXPANSION_FACTOR: "2.0"     # Expansion factor for better fusion
+      PDFKB_HYBRID_MAX_EXPANDED_LIMIT: "30"    # Maximum expanded limit
+
+      # ━━━ VECTOR SEARCH PARAMETERS ━━━
+      PDFKB_VECTOR_SEARCH_K: "5"               # Number of results to return
+
+      # ━━━ BM25 SEARCH PARAMETERS ━━━
+      PDFKB_WHOOSH_ANALYZER: "standard"        # Whoosh analyzer type
+      PDFKB_WHOOSH_MIN_SCORE: "0.0"           # Minimum BM25 score threshold
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🚀 PERFORMANCE & PROCESSING CONFIGURATION                                           │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ PARALLEL PROCESSING LIMITS ━━━
+      # Control concurrent operations to prevent resource exhaustion
+      PDFKB_MAX_PARALLEL_PARSING: "${PDFKB_MAX_PARALLEL_PARSING:-1}"
+      PDFKB_MAX_PARALLEL_EMBEDDING: "${PDFKB_MAX_PARALLEL_EMBEDDING:-1}"
+      PDFKB_BACKGROUND_QUEUE_WORKERS: "${PDFKB_BACKGROUND_QUEUE_WORKERS:-2}"
+      PDFKB_THREAD_POOL_SIZE: "1"
+
+      # ━━━ FILE MONITORING ━━━
+      PDFKB_FILE_SCAN_INTERVAL: "60"           # Seconds between file scans
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🧠 ADVANCED AI FEATURES                                                             │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ RERANKING (Improves search quality) ━━━
+      PDFKB_ENABLE_RERANKER: "false"           # Enable for better search results
+      PDFKB_RERANKER_PROVIDER: "local"         # "local" or "deepinfra"
+      PDFKB_RERANKER_MODEL: "Qwen/Qwen3-Reranker-0.6B"
+      PDFKB_RERANKER_SAMPLE_ADDITIONAL: "5"    # Additional results to sample
+      PDFKB_RERANKER_DEVICE: ""                # Auto-detect device
+      PDFKB_RERANKER_MODEL_CACHE_DIR: "~/.cache/pdfkb-mcp/reranker"
+      PDFKB_RERANKER_GGUF_QUANTIZATION: ""     # GGUF quantization (Q6_K, Q8_0, etc.)
+
+      # ━━━ DeepInfra Reranking (Alternative) ━━━
+      # PDFKB_RERANKER_PROVIDER: "deepinfra"
+      # PDFKB_DEEPINFRA_API_KEY: "YOUR-DEEPINFRA-API-KEY"
+      # PDFKB_DEEPINFRA_RERANKER_MODEL: "Qwen/Qwen3-Reranker-8B"
+
+      # ━━━ DOCUMENT SUMMARIZATION ━━━
+      PDFKB_ENABLE_SUMMARIZER: "false"         # Enable document summarization
+      PDFKB_SUMMARIZER_PROVIDER: "local"       # "local" or "remote"
+      PDFKB_SUMMARIZER_MODEL: "gpt-4"          # Model for summarization
+      PDFKB_SUMMARIZER_MAX_PAGES: "10"         # Max pages to use for summarization
+      PDFKB_SUMMARIZER_DEVICE: ""              # Auto-detect device (local only)
+      PDFKB_SUMMARIZER_MODEL_CACHE_DIR: "~/.cache/pdfkb-mcp/summarizer"
+
+      # ━━━ Remote Summarizer Configuration ━━━
+      # PDFKB_SUMMARIZER_PROVIDER: "remote"
+      # PDFKB_SUMMARIZER_API_BASE: "https://api.deepinfra.com/v1"
+      # PDFKB_SUMMARIZER_API_KEY: "YOUR-API-KEY"
+      # PDFKB_SUMMARIZER_MODEL: "openai/gpt-oss-20b"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ ⚙️  ADVANCED PARSER CONFIGURATIONS                                                   │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ DOCLING PARSER CONFIGURATION ━━━
+      # Set these if using PDFKB_PDF_PARSER="docling"
+      PDFKB_DOCLING_OCR_ENGINE: "easyocr"      # OCR engine: easyocr, tesseract
+      PDFKB_DOCLING_OCR_LANGUAGES: "en"        # Comma-separated: "en,es,fr,de"
+      PDFKB_DOCLING_TABLE_MODE: "FAST"         # Table processing: FAST, ACCURATE
+      PDFKB_DOCLING_FORMULA_ENRICHMENT: "false" # Enable formula processing
+      PDFKB_DOCLING_PROCESSING_TIMEOUT: "300"  # Processing timeout in seconds
+      PDFKB_DOCLING_DEVICE: "auto"             # Device: auto, cpu, cuda, mps
+      PDFKB_DOCLING_MAX_PAGES: "0"             # Max pages (0 = unlimited)
+
+      # ━━━ MARKER PARSER CONFIGURATION ━━━
+      # Set these if using PDFKB_PDF_PARSER="marker"
+      PDFKB_MARKER_USE_LLM: "false"            # Use LLM for enhanced processing
+      PDFKB_MARKER_LLM_MODEL: "google/gemini-2.5-flash-lite"
+      PDFKB_OPENROUTER_API_KEY: ""             # OpenRouter API key
+
+      # ━━━ MINERU PARSER CONFIGURATION ━━━
+      # Set these if using PDFKB_PDF_PARSER="mineru"
+      PDFKB_MINERU_LANG: "en"                  # Language: en, zh, etc.
+      PDFKB_MINERU_METHOD: "auto"              # Processing method
+      PDFKB_MINERU_VRAM: "16"                  # VRAM allocation (GB)
+
+      # ━━━ UNSTRUCTURED PARSER CONFIGURATION ━━━
+      # Set these if using PDFKB_PDF_PARSER="unstructured"
+      PDFKB_UNSTRUCTURED_PDF_PROCESSING_STRATEGY: "fast"  # "fast" or "hi_res"
+
+      # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+      # │ 🔧 ADVANCED CHUNKING CONFIGURATIONS                                                 │
+      # └─────────────────────────────────────────────────────────────────────────────────────┘
+
+      # ━━━ SEMANTIC CHUNKING CONFIGURATION ━━━
+      # Set these if using PDFKB_DOCUMENT_CHUNKER="semantic"
+      PDFKB_SEMANTIC_CHUNKER_THRESHOLD_TYPE: "percentile"  # percentile, standard_deviation, interquartile, gradient
+      PDFKB_SEMANTIC_CHUNKER_THRESHOLD_AMOUNT: "95.0"
+      PDFKB_SEMANTIC_CHUNKER_BUFFER_SIZE: "1"
+      PDFKB_SEMANTIC_CHUNKER_NUMBER_OF_CHUNKS: ""          # Optional limit
+      PDFKB_SEMANTIC_CHUNKER_SENTENCE_SPLIT_REGEX: "(?<=[.?!])\\s+"
+      PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_SIZE: ""            # Optional minimum
+      PDFKB_SEMANTIC_CHUNKER_MIN_CHUNK_CHARS: "100"
+
+      # ━━━ PAGE CHUNKING CONFIGURATION ━━━
+      # Set these if using PDFKB_DOCUMENT_CHUNKER="page"
+      PDFKB_PAGE_CHUNKER_MIN_CHUNK_SIZE: "100"
+      PDFKB_PAGE_CHUNKER_MAX_CHUNK_SIZE: ""                # Optional maximum
+      PDFKB_PAGE_CHUNKER_MERGE_SMALL: "true"               # Merge small chunks
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🏥 HEALTH CHECK & RESOURCE LIMITS
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    # Health check for container orchestration
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+    # Resource limits - adjust based on your system capabilities
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'          # Increase for better performance
+          memory: 8G           # Increase for large document collections
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🔒 SECURITY & USER CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+
+    # Use non-root user (defined in Dockerfile)
+    user: "1001:1001"
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 📋 LOGGING CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🌐 NETWORK CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    # Network settings (creates isolated network)
+    networks:
+      - pdfkb-network
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# 💾 PERSISTENT VOLUMES
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+# Named volumes for data persistence
+volumes:
+  # Cache volume for ChromaDB, vector storage, and processing cache
+  pdfkb-cache:
+    driver: local
+    # Optional: Use bind mount for easy access
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /path/to/local/cache
+
+  # Logs volume for container logs
+  pdfkb-logs:
+    driver: local
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# 🌐 NETWORK DEFINITION
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+# Isolated network for the application
+networks:
+  pdfkb-network:
+    driver: bridge
+    name: pdfkb-network
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# 📝 CONFIGURATION NOTES
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+#
+# 🚀 QUICK START:
+# 1. Copy this file to docker-compose.yml
+# 2. Update the documents volume path: /path/to/your/documents
+# 3. Choose your embedding provider (local is easiest to start)
+# 4. If using remote APIs, set your API keys
+# 5. Run: podman-compose up -d
+#
+# 🎯 RECOMMENDED CONFIGURATIONS:
+#
+# 💻 Local/Offline Setup (No API keys required):
+#   - PDFKB_EMBEDDING_PROVIDER: "local"
+#   - PDFKB_PDF_PARSER: "pymupdf4llm"
+#   - PDFKB_ENABLE_HYBRID_SEARCH: "true"
+#   - PDFKB_ENABLE_RERANKER: "false"
+#
+# 🌐 Cloud/High-Performance Setup:
+#   - PDFKB_EMBEDDING_PROVIDER: "openai"
+#   - Set PDFKB_OPENAI_API_KEY and PDFKB_OPENAI_API_BASE
+#   - PDFKB_ENABLE_RERANKER: "true"
+#   - PDFKB_RERANKER_PROVIDER: "deepinfra"
+#
+# 🔧 Performance Tuning:
+#   - Increase resource limits (CPU/Memory)
+#   - Adjust PDFKB_MAX_PARALLEL_* settings
+#   - Use faster parsers for large documents
+#   - Enable reranking for better search quality
+#
+# 🔐 Security:
+#   - Never commit API keys to version control
+#   - Use environment variables or Docker secrets
+#   - Keep the container updated
+#
+# ═══════════════════════════════════════════════════════════════════════════════════════════════

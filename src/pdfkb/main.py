@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -1151,6 +1152,19 @@ Integrated Mode:
     # Configure logging with the configured level
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    # Suppress websockets deprecation warnings from third-party libraries
+    # These warnings are from uvicorn and fastmcp using deprecated websockets APIs
+    # and are not actionable by end users
+    warnings.filterwarnings(
+        "ignore", message="websockets.legacy is deprecated.*", category=DeprecationWarning, module="websockets.legacy"
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=".*WebSocketServerProtocol is deprecated.*",
+        category=DeprecationWarning,
+        module="uvicorn.protocols.websockets.websockets_impl",
+    )
 
     logger.info("Starting PDF Knowledgebase MCP Server")
     logger.info(f"Version: {__import__('pdfkb').__version__}")
