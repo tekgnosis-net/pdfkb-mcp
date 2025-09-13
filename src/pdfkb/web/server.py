@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -53,6 +53,7 @@ class PDFKnowledgebaseWebServer:
         document_cache: Dict[str, Document],
         save_cache_callback: Optional[callable] = None,
         background_queue: Optional[BackgroundProcessingQueue] = None,
+        lifespan: Optional[Callable] = None,
     ):
         """Initialize the web server.
 
@@ -64,6 +65,7 @@ class PDFKnowledgebaseWebServer:
             document_cache: Document metadata cache
             save_cache_callback: Optional callback to save document cache
             background_queue: Optional background processing queue
+            lifespan: Optional lifespan context manager for FastAPI app
         """
         self.config = config
         self.document_processor = document_processor
@@ -72,6 +74,7 @@ class PDFKnowledgebaseWebServer:
         self.document_cache = document_cache
         self.save_cache_callback = save_cache_callback
         self.background_queue = background_queue
+        self.lifespan = lifespan
         self.start_time = time.time()
 
         # Initialize WebSocket manager first
@@ -99,17 +102,29 @@ class PDFKnowledgebaseWebServer:
         Returns:
             Configured FastAPI application
         """
-        app = FastAPI(
-            title="PDF Knowledgebase MCP API",
-            description="RESTful API for PDF document management and semantic search (MCP Server)",
-            version="1.0.0",
-            docs_url="/docs",
-            redoc_url="/redoc",
-        )
+        # Create FastAPI app with optional lifespan from MCP HTTP app
+        app_kwargs = {
+            "title": "PDF Knowledgebase MCP API",
+            "description": "RESTful API for PDF document management and semantic search (MCP Server)",
+            "version": "1.0.0",
+            "docs_url": "/docs",
+            "redoc_url": "/redoc",
+        }
 
-        # Add startup/shutdown event handlers
-        app.add_event_handler("startup", self._on_startup)
-        app.add_event_handler("shutdown", self._on_shutdown)
+        # Add lifespan if provided (from FastMCP HTTP app)
+        if self.lifespan is not None:
+            app_kwargs["lifespan"] = self.lifespan
+            logger.info("FastAPI app created with MCP lifespan integration")
+        else:
+            logger.info("FastAPI app created without MCP lifespan (MCP not mounted)")
+
+        app = FastAPI(**app_kwargs)
+
+        # Add startup/shutdown event handlers only if no lifespan is provided
+        # (lifespan takes precedence over event handlers)
+        if self.lifespan is None:
+            app.add_event_handler("startup", self._on_startup)
+            app.add_event_handler("shutdown", self._on_shutdown)
 
         # Setup static file serving
         self._setup_static_files(app)

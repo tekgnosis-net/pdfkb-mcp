@@ -136,7 +136,36 @@ class IntegratedPDFKnowledgebaseServer:
             # Check for web dependencies
             self._check_web_dependencies()
 
-            # Background queue was already initialized - create web server using MCP server components
+            # Initialize MCP HTTP app and lifespan handling based on transport
+            mcp_http_app = None
+            mcp_lifespan = None
+            mount_path = None
+
+            if self.config.transport in ["http", "sse"]:
+                # Determine the mount path based on transport type
+                mount_path = "/mcp" if self.config.transport == "http" else "/sse"
+                logger.info(f"Preparing MCP server for {mount_path} with {self.config.transport.upper()} transport")
+
+                try:
+                    # Create the MCP HTTP app with root path - FastAPI mount handles the prefix
+                    # This avoids double path prefix (e.g., /mcp/mcp)
+                    mcp_http_app = self.mcp_server.get_http_app(path="/")
+
+                    # Extract the lifespan from the MCP HTTP app
+                    if hasattr(mcp_http_app, "lifespan"):
+                        mcp_lifespan = mcp_http_app.lifespan
+                        logger.info("Extracted lifespan from FastMCP HTTP app for integration")
+                    else:
+                        logger.warning(
+                            "FastMCP HTTP app does not expose lifespan property - this may cause initialization issues"
+                        )
+
+                except Exception as e:
+                    logger.error(f"Failed to create FastMCP HTTP app: {e}")
+                    raise RuntimeError(f"FastMCP HTTP app creation failed: {e}") from e
+
+            # Create web server with optional MCP lifespan
+            logger.info("Creating web server with MCP lifespan integration...")
             self.web_server = PDFKnowledgebaseWebServer(
                 config=self.config,
                 document_processor=self.mcp_server.document_processor,
@@ -145,23 +174,24 @@ class IntegratedPDFKnowledgebaseServer:
                 document_cache=self.mcp_server._document_cache,
                 save_cache_callback=self.mcp_server._save_document_cache,
                 background_queue=self.background_queue,
+                lifespan=mcp_lifespan,  # Pass MCP lifespan to web server
             )
 
-            # Get the FastAPI app
+            # Get the FastAPI app (now created with MCP lifespan integration)
             self.web_app = self.web_server.get_app()
 
-            # Mount FastMCP into FastAPI for unified ASGI serving
-            if self.config.transport in ["http", "sse"]:
-                # Determine the mount path based on transport type
-                mount_path = "/mcp" if self.config.transport == "http" else "/sse"
+            # Mount the MCP HTTP app if we have one
+            if mcp_http_app and mount_path:
                 logger.info(f"Mounting MCP server at {mount_path} with {self.config.transport.upper()} transport")
 
-                # Mount the MCP ASGI app into FastAPI, ensuring internal routes know the mount prefix
-                self.web_app.mount(mount_path, self.mcp_server.get_http_app(path=mount_path))
-
-                logger.info(
-                    f"MCP endpoints available at: http://{self.config.web_host}:{self.config.web_port}{mount_path}/"
-                )
+                try:
+                    # Mount the pre-created MCP ASGI app into FastAPI
+                    self.web_app.mount(mount_path, mcp_http_app)
+                    endpoint_url = f"http://{self.config.web_host}:{self.config.web_port}{mount_path}/"
+                    logger.info(f"✅ MCP endpoints successfully mounted at: {endpoint_url}")
+                except Exception as e:
+                    logger.error(f"Failed to mount MCP HTTP app: {e}")
+                    raise RuntimeError(f"MCP HTTP app mounting failed: {e}") from e
 
             # Setup middleware and exception handlers
             setup_middleware(self.web_app, self.config)
