@@ -11,7 +11,7 @@ Document Knowledgebase MCP Server is a sophisticated document processing and ret
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        MCP_CLIENT[MCP Clients<br/>Claude/VS Code/Continue]
+        MCP_CLIENT[MCP Clients<br/>Claude/VS Code/Continue<br/>+ MCP Resources Access]
         WEB_CLIENT[Web Browser<br/>React UI]
     end
 
@@ -94,7 +94,12 @@ The system uses a unified server architecture that combines FastMCP and FastAPI 
   - `search_documents`: Hybrid search combining semantic and keyword matching
   - `list_documents`: List all documents with filtering capabilities
   - `remove_document`: Remove documents from the knowledgebase
-- Exposed as ASGI application via `get_http_app()` method
+  - `rescan_documents`: Manual directory scan to detect new/modified/deleted files
+- **MCP Resources**: Chunk-based document access via `doc://<name>/chunk/<indices>` URIs
+  - Supports single chunks: `doc://document.pdf/chunk/0`
+  - Supports multiple chunks: `doc://document.pdf/chunk/1,2,3`
+  - Direct access to specific document chunks from vector store
+- Exposed as ASGI application via `get_http_app()` method with proper lifespan integration
 
 **Web Interface Component** (`src/pdfkb/web/`):
 - Modern FastAPI-based web server providing:
@@ -106,6 +111,7 @@ The system uses a unified server architecture that combines FastMCP and FastAPI 
 
 **Unified Integration** (`src/pdfkb/web_server.py`):
 - Mounts FastMCP ASGI app into FastAPI at `/mcp/` (HTTP) or `/sse/` (SSE)
+- **Fixed FastMCP Integration**: Proper lifespan parameter handling for session manager initialization
 - Serves all endpoints on single port (default 8000)
 - Uses Hypercorn ASGI server for optimal WebSocket support
 - Eliminates resource overhead of dual servers
@@ -276,7 +282,34 @@ Asynchronous task processing system:
 - **Job Tracking**: Status monitoring and cancellation
 - **Error Recovery**: Automatic retry with backoff
 
-### 8. Configuration Management
+### 8. File Monitoring and Rescan System
+
+**Location**: `src/pdfkb/file_monitor.py`
+
+**Automatic File Detection**:
+- **Watchdog Integration**: Real-time file system event monitoring
+- **Periodic Scanner**: Configurable interval-based directory scanning (default: 60s)
+- **Background Processing**: Non-blocking file change detection and processing
+
+**Manual Rescan Functionality** (New in v0.7.0+):
+- **Manual Trigger**: `manual_rescan()` method with detailed result reporting
+- **MCP Integration**: `rescan_documents` tool for programmatic access
+- **Web Interface**: `/api/documents/rescan` endpoint with loading states
+- **Real-time Updates**: WebSocket broadcasts for rescan completion events
+- **Configuration Options**: Control for periodic and manual scanning behaviors
+
+**Rescan Results**:
+```python
+{
+  "summary": "Found 2 new, 1 modified, 0 deleted files",
+  "new_files": ["document1.pdf", "document2.md"],
+  "modified_files": ["document3.pdf"],
+  "deleted_files": [],
+  "scan_duration_seconds": 0.15
+}
+```
+
+### 9. Configuration Management
 
 **Location**: `src/pdfkb/config.py`
 
@@ -285,6 +318,47 @@ Comprehensive configuration system:
 - **Validation**: Type checking and constraint validation
 - **Defaults**: Sensible defaults for all settings
 - **Hot Reload**: Dynamic configuration updates
+- **File Monitoring Control**: Configure periodic scanning intervals and manual rescan behavior
+
+## MCP Resources and Document Access
+
+### Chunk-Based Document Access (New in v0.7.0+)
+
+The system provides granular document access through MCP resources using a chunk-based URI scheme:
+
+#### Resource URI Format
+```
+doc://<document_name_or_id>/chunk/<chunk_indices>
+```
+
+#### Examples
+- **Single chunk**: `doc://my_document.pdf/chunk/0`
+- **Multiple chunks**: `doc://my_document.pdf/chunk/1,2,3`
+- **By document ID**: `doc://doc-123/chunk/5`
+
+#### Implementation Details
+**Location**: `src/pdfkb/main.py` (resource handler)
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP Client
+    participant Server as MCP Server
+    participant VectorStore as Vector Store
+    participant Cache as Document Cache
+
+    Client->>Server: Request doc://name/chunk/1,2,3
+    Server->>Cache: Lookup document by name/ID
+    Cache-->>Server: Document metadata
+    Server->>VectorStore: Fetch chunks by indices
+    VectorStore-->>Server: Chunk content + metadata
+    Server-->>Client: Formatted chunk content
+```
+
+#### Benefits Over Page-Based Access
+1. **Precision**: Access specific semantic chunks rather than arbitrary pages
+2. **Efficiency**: Direct vector store retrieval without page reconstruction
+3. **Flexibility**: Multi-chunk access for context-aware AI interactions
+4. **Architecture Alignment**: Matches underlying chunking and embedding strategy
 
 ## Data Flow
 
@@ -327,6 +401,35 @@ sequenceDiagram
     Processor->>Storage: Store in Vector/Text DB
     Storage-->>Interface: Processing Complete
     Interface-->>User: Document Ready
+
+### File Monitor and Rescan Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Interface as MCP/Web Interface
+    participant Monitor as File Monitor
+    participant Scanner as Directory Scanner
+    participant Queue as Background Queue
+    participant WebSocket as WebSocket Manager
+
+    User->>Interface: Trigger Manual Rescan
+    Interface->>Monitor: manual_rescan()
+    Monitor->>Scanner: Scan directory
+    Scanner-->>Monitor: File changes detected
+
+    par New Files
+        Monitor->>Queue: Queue new files for processing
+    and Modified Files
+        Monitor->>Queue: Queue modified files for reprocessing
+    and Deleted Files
+        Monitor->>Storage: Remove deleted files from storage
+    end
+
+    Monitor-->>Interface: Rescan results summary
+    Interface->>WebSocket: Broadcast rescan completion
+    WebSocket-->>User: Real-time notification
+    Interface-->>User: Display rescan results
 ```
 
 ### Search Flow
@@ -471,13 +574,16 @@ graph TB
 **Unified Server Architecture:**
 - **Port 8000**: Unified server port serving both web interface and MCP endpoints
   - Web interface: `http://localhost:8000/`
-  - MCP HTTP endpoints: `http://localhost:8000/mcp/`
+  - MCP HTTP endpoints: `http://localhost:8000/mcp/` (Fixed lifespan integration)
   - MCP SSE endpoints: `http://localhost:8000/sse/`
   - API documentation: `http://localhost:8000/docs`
   - Health endpoint: `http://localhost:8000/health`
+  - Document rescan: `http://localhost:8000/api/documents/rescan`
 
 **Transport Modes:**
 - **HTTP Mode**: RESTful MCP protocol mounted at `/mcp/` for modern clients (Cline)
+  - **Fixed Integration**: Proper FastMCP lifespan parameter handling eliminates session manager errors
+  - **Resource Support**: Chunk-based document access via MCP resources
 - **SSE Mode**: Server-Sent Events mounted at `/sse/` for legacy clients (Roo)
 - **Stdio Mode**: Standard I/O transport for local MCP clients (Claude Desktop)
 
@@ -517,7 +623,7 @@ docker run -d \
   pdfkb-mcp:latest
 ```
 
-**2. Docker Compose Deployment**
+**3. Docker Compose Deployment**
 ```yaml
 # docker-compose.yml with volume mounts and environment
 services:
@@ -533,6 +639,20 @@ services:
       - PDFKB_EMBEDDING_PROVIDER=local
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+```
+
+**4. Container Management (Podman Support)**
+```bash
+# Build with Podman (recommended for security)
+podman build -t pdfkb-mcp:latest .
+
+# Run with Podman Compose
+podman compose up -d
+
+# Container lifecycle management
+podman compose down && podman compose up -d  # Restart
+podman logs pdfkb-mcp                        # View logs
+podman ps                                    # Check status
 ```
 
 **3. Kubernetes Deployment**
@@ -666,14 +786,25 @@ CMD ["pdfkb-mcp"]
 - **Readiness**: Component initialization status
 - **Dependencies**: External service connectivity
 
+## Recent Enhancements (v0.7.0+)
+
+### Recently Implemented Features
+1. **✅ Chunk-Based MCP Resources**: Granular document access via `doc://<name>/chunk/<indices>` URIs
+2. **✅ Manual Document Rescan**: Programmatic and web-based directory scanning
+3. **✅ FastMCP Integration Fixes**: Proper lifespan handling for HTTP endpoints
+4. **✅ Enhanced Web Interface**: Rescan functionality with real-time updates
+5. **✅ Container Management**: Improved Docker/Podman deployment workflows
+
 ## Future Enhancements
 
 ### Planned Features
-1. **Multi-modal Processing**: Image and table extraction
-2. **Graph RAG**: Knowledge graph construction
-3. **Streaming Responses**: Real-time document processing
-4. **Collaborative Features**: Multi-user document sharing
-5. **Advanced Analytics**: Usage patterns and insights
+1. **Multi-modal Processing**: Image and table extraction from PDFs
+2. **Graph RAG**: Knowledge graph construction from document relationships
+3. **Streaming Responses**: Real-time document processing with progress updates
+4. **Collaborative Features**: Multi-user document sharing and annotations
+5. **Advanced Analytics**: Usage patterns, search insights, and performance metrics
+6. **Enhanced Resource Types**: Support for image, table, and metadata resources
+7. **Reranking Integration**: Advanced result reranking for improved search quality
 
 ### Architecture Evolution
 1. **Microservices**: Separate processing services
