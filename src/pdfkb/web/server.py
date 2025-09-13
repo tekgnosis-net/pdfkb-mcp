@@ -545,20 +545,23 @@ class PDFKnowledgebaseWebServer:
                 logger.info("Manual document rescan requested via web API")
                 rescan_result = await file_monitor.manual_rescan()
 
+                # Extract change counts from the nested structure
+                changes_detected = rescan_result.get("changes_detected", {})
+                new_count = changes_detected.get("new_files", 0)
+                modified_count = changes_detected.get("modified_files", 0)
+                deleted_count = changes_detected.get("deleted_files", 0)
+                total_changes = new_count + modified_count + deleted_count
+
                 # Broadcast rescan completion to connected WebSocket clients
                 await self.websocket_manager.broadcast(
-                    "documents_rescanned",
+                    "system_status_changed",
                     {
-                        "new_files": rescan_result["new_files"],
-                        "modified_files": rescan_result["modified_files"],
-                        "deleted_files": rescan_result["deleted_files"],
-                        "total_changes": sum(
-                            [
-                                len(rescan_result["new_files"]),
-                                len(rescan_result["modified_files"]),
-                                len(rescan_result["deleted_files"]),
-                            ]
-                        ),
+                        "new_files_count": new_count,
+                        "modified_files_count": modified_count,
+                        "deleted_files_count": deleted_count,
+                        "total_changes": total_changes,
+                        "scan_time_seconds": rescan_result.get("scan_time_seconds", 0),
+                        "total_files_scanned": rescan_result.get("total_files_scanned", 0),
                     },
                     "Document library rescanned",
                 )

@@ -70,6 +70,8 @@ class IntegratedPDFKnowledgebaseServer:
                 await self._initialize_web_server()
                 # Now initialize FileMonitor with web document service reference
                 await self.mcp_server.initialize_file_monitor(web_document_service=self.web_server.document_service)
+                # Update web server's file monitor reference after FileMonitor is initialized
+                self.web_server._file_monitor = self.mcp_server.file_monitor
             else:
                 logger.info("Web interface disabled in configuration")
                 # Initialize FileMonitor without web document service

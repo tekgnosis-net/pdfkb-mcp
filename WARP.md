@@ -328,3 +328,45 @@ git push origin main --tags
 - Background processing queue prevents blocking operations
 - Intelligent caching system minimizes reprocessing on configuration changes
 - **We use Podman instead of Docker** for containerization (all Docker commands should use `podman` instead)
+
+## Container Management
+
+### Building and Deployment Commands
+
+**ALWAYS use Podman instead of Docker for all container operations:**
+
+```bash
+# Build the container image
+podman build -t pdfkb-mcp:latest .
+
+# Stop running containers
+podman compose down
+
+# Start containers in detached mode
+podman compose up -d
+
+# View running containers
+podman ps
+
+# View container logs
+podman logs pdfkb-mcp
+
+# Restart after code changes
+podman compose down && podman compose up -d
+```
+
+### Container Deployment Workflow
+
+```bash
+# 1. Complete pre-commit workflow (test, format, lint, commit)
+hatch run test && hatch run format && hatch run lint
+git add -A && git commit -m "your message"
+
+# 2. Rebuild container with latest code
+podman build -t pdfkb-mcp:latest .
+
+# 3. Restart deployment
+podman compose down && podman compose up -d
+```
+
+**Note**: The main compose file is `docker-compose.yml` (not `docker-compose.dev.yml`)
