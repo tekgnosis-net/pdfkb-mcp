@@ -35,7 +35,7 @@ keywords = [
 requires-python = ">=3.10"
 dependencies = [
     # Core MCP runtime
-    "fastmcp>=2.11.1",
+    "fastmcp>=2.12.3",
 
     # Vector database
     "chromadb>=1.0.15",
@@ -51,8 +51,7 @@ dependencies = [
 
     # Web interface core dependencies
     "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "wsproto>=1.2.0",  # WebSocket protocol implementation (non-deprecated)
+    "hypercorn>=0.17.0",  # ASGI server with excellent websockets 14+ support
     "python-multipart>=0.0.6",
     "websockets>=12.0",
     "pydantic>=2.5.0",
@@ -262,7 +261,7 @@ module = [
     "unstructured.*",
     "fastmcp.*",
     "mcp.*",
-    "uvicorn.*",
+    "hypercorn.*",
     "websockets.*",
     "psutil.*",
 ]

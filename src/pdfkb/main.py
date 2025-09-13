@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import time
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -1005,6 +1004,14 @@ class PDFKnowledgebaseServer:
         except Exception as e:
             logger.error(f"Failed to save document cache: {e}")
 
+    def get_http_app(self):
+        """Get the FastMCP HTTP ASGI application for integration into FastAPI.
+
+        Returns:
+            ASGI application instance that can be mounted in FastAPI
+        """
+        return self.app.http_app()
+
     async def run(self) -> None:
         """Run the MCP server."""
         await self.initialize()
@@ -1069,46 +1076,43 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment Variables:
-  OPENAI_API_KEY          OpenAI API key (required)
-  KNOWLEDGEBASE_PATH      Path to PDF directory (default: ./pdfs)
-  CACHE_DIR              Cache directory (default: <KNOWLEDGEBASE_PATH>/.cache)
-  PDFKB_WEB_ENABLE       Enable web interface (1/true/yes to enable, default: false)
-  WEB_PORT               Web server port (default: 8080)
-  WEB_HOST               Web server host (default: localhost)
-  PDF_PARSER             PDF parser to use (default: pymupdf4llm)
-  PDF_CHUNKER            Text chunker to use (default: langchain)
-  LOG_LEVEL              Logging level (default: INFO)
+  OPENAI_API_KEY          OpenAI API key (required for OpenAI embeddings)
+  PDFKB_KNOWLEDGEBASE_PATH Path to PDF directory (default: ./documents)
+  PDFKB_CACHE_DIR         Cache directory (default: <KNOWLEDGEBASE_PATH>/.cache)
+  PDFKB_WEB_ENABLE        Enable web interface (true/false, default: false)
+  PDFKB_WEB_PORT          Unified server port (default: 8000)
+  PDFKB_WEB_HOST          Server host (default: localhost)
+  PDFKB_PDF_PARSER        PDF parser to use (default: pymupdf4llm)
+  PDFKB_DOCUMENT_CHUNKER  Text chunker to use (default: langchain)
+  PDFKB_LOG_LEVEL         Logging level (default: INFO)
 
 Examples:
-  pdfkb-mcp                          # Run with default settings (MCP only, stdio transport)
-  pdfkb-mcp --transport http         # Run with HTTP transport (for Cline, modern clients)
-  pdfkb-mcp --transport sse          # Run with SSE transport (for Roo, legacy clients)
-  PDFKB_WEB_ENABLE=true pdfkb-mcp    # Run with web interface enabled
-  pdfkb-mcp --config myconfig.env    # Use custom config file
+  pdfkb-mcp                            # Run MCP-only, stdio transport
+  pdfkb-mcp --transport http           # Run with HTTP transport (for Cline, modern clients)
+  pdfkb-mcp --transport sse            # Run with SSE transport (for Roo, legacy clients)
+  PDFKB_WEB_ENABLE=true pdfkb-mcp      # Run with web interface enabled
+  pdfkb-mcp --enable-web               # Run unified server (web + MCP)
+  pdfkb-mcp --config myconfig.env      # Use custom config file
 
-Remote Transport:
-  HTTP (modern): http://localhost:8000/mcp/
-  SSE (legacy):  http://localhost:8000/sse/
+Endpoints:
+  Unified Mode (PDFKB_WEB_ENABLE=true):
+    Web interface:  http://localhost:8000/
+    MCP (HTTP):     http://localhost:8000/mcp/
+    MCP (SSE):      http://localhost:8000/sse/
+    API docs:       http://localhost:8000/docs
 
-Integrated Mode:
-  With web enabled, both MCP and web run on adjacent ports:
-  Web: http://localhost:8084/ (web-port, from PDFKB_WEB_PORT)
-  MCP: http://localhost:8085/[mcp|sse]/ (web-port + 1, depends on transport)
-  API Docs: http://localhost:8084/docs
+  MCP-only Mode (stdio transport is used by MCP clients like Claude Desktop)
         """,
     )
 
     parser.add_argument("--config", type=str, help="Path to environment configuration file")
 
-    parser.add_argument("--port", type=int, help="Override MCP server port (for stdio mode, this has no effect)")
     parser.add_argument(
         "--transport",
         choices=["stdio", "http", "sse"],
         default="stdio",
         help="MCP transport mode (default: stdio, use http/sse for remote connections)",
     )
-    parser.add_argument("--server-host", type=str, help="Host for HTTP transport mode (default: localhost)")
-    parser.add_argument("--server-port", type=int, help="Port for HTTP transport mode (default: 8000)")
 
     parser.add_argument("--enable-web", action="store_true", help="Enable web interface")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Override logging level")
@@ -1142,32 +1146,13 @@ Integrated Mode:
         config.web_enabled = True
     if args.transport:
         config.transport = args.transport
-    if getattr(args, "server_host", None):
-        config.server_host = args.server_host
-    if getattr(args, "server_port", None):
-        config.server_port = args.server_port
+
     if args.log_level:
         config.log_level = args.log_level
 
     # Configure logging with the configured level
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-    # Suppress websockets deprecation warnings from third-party libraries
-    # These warnings are from uvicorn and fastmcp using deprecated websockets APIs
-    # and are not actionable by end users
-    warnings.filterwarnings(
-        "ignore", message="websockets.legacy is deprecated.*", category=DeprecationWarning, module="websockets.legacy"
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=".*WebSocketServerProtocol is deprecated.*",
-        category=DeprecationWarning,
-        module="uvicorn.protocols.websockets.websockets_impl",
-    )
-
-    logger.info("Starting PDF Knowledgebase MCP Server")
-    logger.info(f"Version: {__import__('pdfkb').__version__}")
     logger.info(f"Configuration: {config.knowledgebase_path}")
     logger.info(f"Cache directory: {config.cache_dir}")
     logger.info(f"Web interface: {'enabled' if config.web_enabled else 'disabled'}")
@@ -1184,10 +1169,14 @@ Integrated Mode:
     try:
         if config.web_enabled:
             # Run integrated server (MCP + Web)
-            logger.info("Running in integrated mode (MCP + Web)")
-            if config.web_enabled:
-                logger.info(f"Web interface will be available at: http://{config.web_host}:{config.web_port}")
-                logger.info(f"API documentation will be available at: http://{config.web_host}:{config.web_port}/docs")
+            logger.info("Running in unified server mode (MCP + Web via Hypercorn)")
+            logger.info(f"Web interface will be available at: http://{config.web_host}:{config.web_port}")
+            if config.transport in ["http", "sse"]:
+                endpoint = "mcp" if config.transport == "http" else "sse"
+                logger.info(
+                    f"MCP endpoints will be available at: http://{config.web_host}:{config.web_port}/{endpoint}/"
+                )
+            logger.info(f"API documentation will be available at: http://{config.web_host}:{config.web_port}/docs")
 
             # Import here to avoid circular imports and ensure web dependencies are only required when needed
             from .web_server import IntegratedPDFKnowledgebaseServer

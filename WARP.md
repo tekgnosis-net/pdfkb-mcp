@@ -13,7 +13,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 - **MCP Server** (`src/pdfkb/main.py`): FastMCP-based server providing tools (`add_document`, `search_documents`, `list_documents`, `remove_document`)
 - **Document Processing Pipeline**: Multi-parser system with intelligent caching and background processing
 - **Vector Store** (`src/pdfkb/vector_store.py`): ChromaDB-based semantic search with hybrid search support
-- **Web Interface** (`src/pdfkb/web/`): FastAPI-based web server with WebSocket support
+- **Web Interface** (`src/pdfkb/web/`): FastAPI-based web server with WebSocket support (using Hypercorn ASGI server)
 - **Configuration System** (`src/pdfkb/config.py`): Environment-based configuration with comprehensive options
 
 ### Key Architecture Patterns
@@ -128,8 +128,9 @@ PDFKB_CACHE_DIR="./.cache"
 
 # Web interface (disabled by default)
 PDFKB_WEB_ENABLE="false"
-PDFKB_WEB_PORT="8080"
+PDFKB_WEB_PORT="8000"
 PDFKB_WEB_HOST="localhost"
+PDFKB_MCP_PORT="8001"
 
 # Parser and chunker selection
 PDFKB_PDF_PARSER="pymupdf4llm"  # pymupdf4llm, marker, mineru, docling, llm
@@ -271,12 +272,12 @@ pdfkb-mcp --transport sse --server-port 8000   # SSE transport (accessible at ht
 PDFKB_WEB_ENABLE=true pdfkb-mcp  # Web interface only (no remote MCP)
 
 # HTTP transport (for Cline, modern MCP clients)
-PDFKB_WEB_ENABLE=true pdfkb-mcp --transport http --server-port 8084
-# → Web: http://localhost:8084/, MCP: http://localhost:8085/mcp/, Docs: http://localhost:8084/docs
+PDFKB_WEB_ENABLE=true pdfkb-mcp --transport http
+# → Web: http://localhost:8000/, MCP: http://localhost:8001/mcp/, Docs: http://localhost:8000/docs
 
 # SSE transport (for Roo, legacy MCP clients)
-PDFKB_WEB_ENABLE=true pdfkb-mcp --transport sse --server-port 8084
-# → Web: http://localhost:8084/, MCP: http://localhost:8085/sse/, Docs: http://localhost:8084/docs
+PDFKB_WEB_ENABLE=true pdfkb-mcp --transport sse
+# → Web: http://localhost:8000/, MCP: http://localhost:8001/sse/, Docs: http://localhost:8000/docs
 ```
 
 ## Key Files and Their Roles

@@ -46,8 +46,8 @@ def sse_config(temp_knowledgebase):
     os.environ["PDFKB_KNOWLEDGEBASE_PATH"] = temp_knowledgebase
     os.environ["PDFKB_CACHE_DIR"] = str(Path(temp_knowledgebase).parent / ".cache")
     os.environ["PDFKB_TRANSPORT"] = "sse"
-    os.environ["PDFKB_SERVER_HOST"] = "127.0.0.1"
-    os.environ["PDFKB_SERVER_PORT"] = "8000"  # Use valid port for testing
+    os.environ["PDFKB_WEB_HOST"] = "127.0.0.1"  # Use unified web_host
+    os.environ["PDFKB_WEB_PORT"] = "8000"  # Use unified web_port
     os.environ["PDFKB_LOG_LEVEL"] = "WARNING"  # Reduce log noise
     os.environ["PDFKB_EMBEDDING_PROVIDER"] = "local"  # Use local for testing
     os.environ["PDFKB_LOCAL_EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"  # Small model
@@ -66,7 +66,7 @@ async def sse_server(sse_config, sample_pdf_path):
     await server.initialize()
 
     # Mock URL for testing
-    base_url = f"http://{sse_config.server_host}:{sse_config.server_port or 8000}"
+    base_url = f"http://{sse_config.web_host}:{sse_config.web_port}"
 
     yield base_url, server, None
 
@@ -82,8 +82,8 @@ async def test_sse_server_startup(sse_config):
 
     # Test config without actually binding (just check config)
     assert sse_config.transport == "sse"
-    assert sse_config.server_host == "127.0.0.1"
-    assert sse_config.server_port == 8000
+    assert sse_config.web_host == "127.0.0.1"
+    assert sse_config.web_port == 8000
 
     await server.shutdown()
 
@@ -96,7 +96,7 @@ async def test_sse_tool_endpoint(sse_server, sample_pdf_path):
     # Test that server was initialized properly for SSE mode
     assert server is not None
     assert server.config.transport == "sse"
-    assert server.config.server_host == "127.0.0.1"
+    assert server.config.web_host == "127.0.0.1"
 
     # Test that core components are initialized
     assert server.embedding_service is not None
@@ -132,34 +132,30 @@ async def test_concurrent_web_sse(sse_config, temp_knowledgebase):
     """Test concurrent web + SSE mode configuration validation."""
     # Configure for integrated mode with SSE
     os.environ["PDFKB_WEB_ENABLE"] = "true"
-    os.environ["PDFKB_WEB_PORT"] = "8081"  # Different from server port
+    os.environ["PDFKB_WEB_PORT"] = "8081"  # Use unified web_port
     os.environ["PDFKB_TRANSPORT"] = "sse"
-    os.environ["PDFKB_SERVER_PORT"] = "8000"
 
     config = ServerConfig.from_env()
 
     # Test configuration is valid
     assert config.web_enabled is True
     assert config.web_port == 8081
-    assert config.server_port == 8000
     assert config.transport == "sse"
-    assert config.web_port != config.server_port  # No port conflicts
 
 
 @pytest.mark.asyncio
 async def test_sse_port_conflict_validation(sse_config):
     """Test port conflict validation configuration."""
-    # Configure conflicting ports
+    # Configure unified server port (no conflicts in unified architecture)
     os.environ["PDFKB_WEB_ENABLE"] = "true"
     os.environ["PDFKB_WEB_PORT"] = "8000"
     os.environ["PDFKB_TRANSPORT"] = "sse"
-    os.environ["PDFKB_SERVER_PORT"] = "8000"  # Same as web port
 
     config = ServerConfig.from_env()
 
-    # Test that configuration shows port conflict
+    # Test that configuration is valid (no port conflicts in unified architecture)
     assert config.web_enabled is True
-    assert config.web_port == config.server_port  # Port conflict detected
+    assert config.web_port == 8000
     assert config.transport == "sse"
 
 

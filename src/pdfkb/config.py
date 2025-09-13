@@ -30,9 +30,7 @@ class ServerConfig:
     embedding_batch_size: int = 100
 
     # Transport configuration
-    transport: str = "stdio"  # "stdio" or "http"
-    server_host: str = "localhost"
-    server_port: int = 8000  # Used for both MCP HTTP and web interface
+    transport: str = "stdio"  # "stdio", "http", or "sse"
 
     # Embedding provider configuration
     embedding_provider: str = "local"  # "local", "openai", or "huggingface"
@@ -81,7 +79,7 @@ class ServerConfig:
     mineru_vram: int = 16
     # Web server configuration (disabled by default)
     web_enabled: bool = False
-    web_port: int = 8080
+    web_port: int = 8000  # Default unified server port (web + MCP endpoints)
     web_host: str = "localhost"
     web_cors_origins: List[str] = field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"])
 
@@ -204,12 +202,8 @@ class ServerConfig:
         if self.transport not in ["stdio", "http", "sse"]:
             raise ConfigurationError("transport must be 'stdio', 'http', or 'sse'")
 
-        # Validate HTTP/SSE configuration
-        if self.transport in ["http", "sse"]:
-            if self.server_port <= 0 or self.server_port > 65535:
-                raise ConfigurationError("server_port must be between 1 and 65535")
-            if not self.server_host:
-                raise ConfigurationError("server_host cannot be empty")
+        # Note: For HTTP/SSE transport in unified mode, endpoints are served
+        # on the same port as the web interface when web_enabled=True
 
         if self.chunk_overlap >= self.chunk_size:
             raise ConfigurationError("chunk_overlap must be less than chunk_size")
@@ -947,16 +941,8 @@ class ServerConfig:
         if transport:
             config_kwargs["transport"] = transport.lower()
 
-        server_host = os.getenv("PDFKB_SERVER_HOST") or os.getenv("PDFKB_SSE_HOST")
-        if server_host:
-            config_kwargs["server_host"] = server_host
-
-        server_port = os.getenv("PDFKB_SERVER_PORT") or os.getenv("PDFKB_SSE_PORT")
-        if server_port:
-            try:
-                config_kwargs["server_port"] = int(server_port)
-            except ValueError:
-                raise ConfigurationError(f"Invalid PDFKB_SERVER_PORT: {server_port}")
+        # Note: In unified server mode, MCP endpoints are served on the same port
+        # as the web interface. Legacy server host/port configuration is no longer needed.
 
         return cls(**config_kwargs)
 

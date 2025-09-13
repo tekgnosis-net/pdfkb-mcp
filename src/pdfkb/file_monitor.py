@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -176,7 +177,7 @@ class FileMonitor:
         # Metadata persistence
         self.file_index: Dict[str, FileMetadata] = {}
         self.file_index_path = self.config.metadata_path / "file_index.json"
-        self.index_lock = asyncio.Lock()
+        self.index_lock = threading.Lock()  # Use threading.Lock instead of asyncio.Lock for thread pool compatibility
 
         # Event processing
         self.debouncer = FileEventDebouncer(delay=1.0)
@@ -756,10 +757,11 @@ class FileMonitor:
                                 logger.warning(f"Failed to save document cache after removal: {e}")
 
             # Remove from file index
-            async with self.index_lock:
+            with self.index_lock:
                 if normalized_path in self.file_index:
                     del self.file_index[normalized_path]
-                    await self.save_file_index()
+                    # Create a task to save the file index asynchronously
+                    asyncio.create_task(self.save_file_index())
 
             # Remove from failed files if present
             self.failed_files.pop(normalized_path, None)
@@ -779,7 +781,7 @@ class FileMonitor:
             List of file information dictionaries.
         """
         try:
-            async with self.index_lock:
+            with self.index_lock:
                 files = []
                 for metadata in self.file_index.values():
                     file_info = {
@@ -858,7 +860,7 @@ class FileMonitor:
                 loop = asyncio.get_event_loop()
                 data = await loop.run_in_executor(self.executor, _load_index)
 
-                async with self.index_lock:
+                with self.index_lock:
                     self.file_index = {}
                     for file_path, metadata_dict in data.items():
                         try:
@@ -915,7 +917,7 @@ class FileMonitor:
     async def save_file_index(self) -> None:
         """Save file index to persistent storage."""
         try:
-            async with self.index_lock:
+            with self.index_lock:
                 data = {path: metadata.to_dict() for path, metadata in self.file_index.items()}
 
             # Run save in executor to avoid blocking
@@ -937,7 +939,7 @@ class FileMonitor:
                             Set to False during bulk operations to avoid blocking.
         """
         try:
-            async with self.index_lock:
+            with self.index_lock:
                 # Store normalized path (resolved to absolute path)
                 normalized_path = str(file_path.resolve())
                 self.file_index[normalized_path] = metadata

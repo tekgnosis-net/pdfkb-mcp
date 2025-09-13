@@ -17,8 +17,7 @@ services:
 
     # Port mapping for development
     ports:
-      - "${PDFKB_SERVER_PORT:-8000}:8000"   # MCP HTTP/SSE transport
-      - "${PDFKB_WEB_PORT:-8080}:8080"      # Web interface
+      - "${PDFKB_WEB_PORT:-8000}:8000"      # Unified server (Web + MCP endpoints)
 
     # Volume mounts for development
     volumes:
@@ -46,8 +45,6 @@ services:
 
       # === Transport Configuration ===
       PDFKB_TRANSPORT: "${PDFKB_TRANSPORT:-http}"
-      PDFKB_SERVER_HOST: "0.0.0.0"
-      PDFKB_SERVER_PORT: "8000"
 
       # === Embedding Configuration ===
       # Default: local embeddings for development (no API cost)
@@ -62,10 +59,10 @@ services:
       HF_TOKEN: "${HF_TOKEN:-}"
       PDFKB_HUGGINGFACE_EMBEDDING_MODEL: "${PDFKB_HUGGINGFACE_EMBEDDING_MODEL:-}"
 
-      # === Web Interface Configuration ===
-      PDFKB_WEB_ENABLE: "${PDFKB_WEB_ENABLE:-true}"  # Enable web interface for dev
+      # === Unified Server Configuration ===
+      PDFKB_WEB_ENABLE: "${PDFKB_WEB_ENABLE:-true}"  # Enable unified server for dev
       PDFKB_WEB_HOST: "0.0.0.0"
-      PDFKB_WEB_PORT: "8080"
+      PDFKB_WEB_PORT: "8000"  # Serves both web interface and MCP endpoints
 
       # === Processing Configuration ===
       PDFKB_PDF_PARSER: "${PDFKB_PDF_PARSER:-pymupdf4llm}"

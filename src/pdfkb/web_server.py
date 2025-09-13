@@ -89,17 +89,13 @@ class IntegratedPDFKnowledgebaseServer:
         if self.config.transport not in ["stdio", "http", "sse"]:
             raise ValueError(f"Invalid MCP transport mode: {self.config.transport}")
 
-        # For integrated mode, we use adjacent ports for MCP and web
+        # For integrated mode, validate web port (MCP is mounted within same app)
         if self.config.web_enabled and self.config.transport in ["http", "sse"]:
-            # Use server_port as the unified port
-            if self.config.server_port <= 0 or self.config.server_port > 65535:
-                raise ValueError(f"Invalid server port: {self.config.server_port}")
-            if not self.config.server_host:
-                raise ValueError("Server host cannot be empty")
-
-            # Set web configuration to match server configuration for unified approach
-            self.config.web_port = self.config.server_port
-            self.config.web_host = self.config.server_host
+            # Validate web port (unified server)
+            if self.config.web_port <= 0 or self.config.web_port > 65535:
+                raise ValueError(f"Invalid web port: {self.config.web_port}")
+            if not self.config.web_host:
+                raise ValueError("Web host cannot be empty")
 
         elif self.config.web_enabled:
             # Web-only mode (no HTTP MCP)
@@ -154,11 +150,24 @@ class IntegratedPDFKnowledgebaseServer:
             # Get the FastAPI app
             self.web_app = self.web_server.get_app()
 
+            # Mount FastMCP into FastAPI for unified ASGI serving
+            if self.config.transport in ["http", "sse"]:
+                # Determine the mount path based on transport type
+                mount_path = "/mcp" if self.config.transport == "http" else "/sse"
+                logger.info(f"Mounting MCP server at {mount_path} with {self.config.transport.upper()} transport")
+
+                # Mount the MCP ASGI app into FastAPI
+                self.web_app.mount(mount_path, self.mcp_server.get_http_app())
+
+                logger.info(
+                    f"MCP endpoints available at: http://{self.config.web_host}:{self.config.web_port}{mount_path}/"
+                )
+
             # Setup middleware and exception handlers
             setup_middleware(self.web_app, self.config)
             setup_exception_handlers(self.web_app)
 
-            logger.info(f"Web server configured to run on {self.config.web_host}:{self.config.web_port}")
+            logger.info(f"Unified server configured to run on {self.config.web_host}:{self.config.web_port}")
 
         except Exception as e:
             logger.error(f"Failed to initialize web server: {e}")
@@ -174,14 +183,9 @@ class IntegratedPDFKnowledgebaseServer:
             missing_deps.append("fastapi")
 
         try:
-            import uvicorn  # noqa: F401
+            import hypercorn  # noqa: F401
         except ImportError:
-            missing_deps.append("uvicorn")
-
-        try:
-            import websockets  # noqa: F401
-        except ImportError:
-            missing_deps.append("websockets")
+            missing_deps.append("hypercorn")
 
         if missing_deps:
             raise ImportError(
@@ -215,23 +219,18 @@ class IntegratedPDFKnowledgebaseServer:
             if not self.web_app:
                 raise RuntimeError("Web server not initialized")
 
-            import uvicorn
+            import hypercorn.asyncio
+            from hypercorn.config import Config as HypercornConfig
 
-            # Create uvicorn config
-            # Use wsproto for WebSocket to avoid deprecated websockets.legacy warning
-            uvicorn_config = uvicorn.Config(
-                app=self.web_app,
-                host=self.config.web_host,
-                port=self.config.web_port,
-                log_level=self.config.log_level.lower(),
-                access_log=True,
-                loop="asyncio",
-                ws="wsproto",  # Use wsproto instead of deprecated websockets
-            )
+            # Create hypercorn config (replaces uvicorn for better websockets 14+ support)
+            hypercorn_config = HypercornConfig()
+            hypercorn_config.bind = [f"{self.config.web_host}:{self.config.web_port}"]
+            hypercorn_config.loglevel = self.config.log_level.lower()
+            hypercorn_config.access_log_format = "%(h)s %(r)s %(s)s %(b)s %(D)s"
+            hypercorn_config.accesslog = "-"  # Log to stdout
 
             # Run the web server
-            server = uvicorn.Server(uvicorn_config)
-            await server.serve()
+            await hypercorn.asyncio.serve(self.web_app, hypercorn_config)
 
         except KeyboardInterrupt:
             logger.info("Received interrupt signal, shutting down web server...")
@@ -271,84 +270,38 @@ class IntegratedPDFKnowledgebaseServer:
             await self.shutdown()
 
     async def _run_unified_server(self) -> None:
-        """Run both MCP and web servers concurrently on adjacent ports."""
+        """Run unified server with FastMCP mounted in FastAPI via Hypercorn."""
         try:
-            # Use adjacent ports: web on configured port, MCP on +1
-            mcp_port = self.config.web_port + 1
-
             # Determine endpoint path based on transport
             endpoint_path = "mcp" if self.config.transport == "http" else "sse"
 
-            logger.info(f"🌐 Starting dual server setup ({self.config.transport.upper()} transport)...")
+            logger.info(f"🌐 Starting unified server ({self.config.transport.upper()} transport)...")
             logger.info(f"🌍 Web interface: http://{self.config.web_host}:{self.config.web_port}")
-            logger.info(f"📡 MCP server: http://{self.config.web_host}:{mcp_port}/{endpoint_path}/")
+            logger.info(f"📡 MCP endpoints: http://{self.config.web_host}:{self.config.web_port}/{endpoint_path}/")
             logger.info(f"📚 API docs: http://{self.config.web_host}:{self.config.web_port}/docs")
 
-            # Create tasks for both servers
-            tasks = []
+            if not self.web_app:
+                raise RuntimeError("Web server not initialized")
 
-            # Web server task
-            web_task = asyncio.create_task(self._run_web_server())
-            tasks.append(web_task)
+            import hypercorn.asyncio
+            from hypercorn.config import Config as HypercornConfig
 
-            # MCP server task
-            mcp_task = asyncio.create_task(self._run_mcp_server(mcp_port))
-            tasks.append(mcp_task)
+            # Create hypercorn config (unified server for both web and MCP)
+            hypercorn_config = HypercornConfig()
+            hypercorn_config.bind = [f"{self.config.web_host}:{self.config.web_port}"]
+            hypercorn_config.loglevel = self.config.log_level.lower()
+            hypercorn_config.access_log_format = "%(h)s %(r)s %(s)s %(b)s %(D)s"
+            hypercorn_config.accesslog = "-"  # Log to stdout
 
-            # Wait for both servers
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Run the unified server
+            await hypercorn.asyncio.serve(self.web_app, hypercorn_config)
 
         except Exception as e:
             logger.error(f"❌ Unified server error: {e}")
             self._shutdown_event.set()
             raise
         finally:
-            logger.info("🔴 Dual server completed")
-
-    async def _run_web_server(self) -> None:
-        """Run the web server in a task."""
-        logger.info("Starting web server task")
-        try:
-            if not self.web_app:
-                raise RuntimeError("Web server not initialized")
-
-            import uvicorn
-
-            # Create uvicorn config
-            uvicorn_config = uvicorn.Config(
-                app=self.web_app,
-                host=self.config.web_host,
-                port=self.config.web_port,
-                log_level=self.config.log_level.lower(),
-                access_log=True,
-                loop="asyncio",
-                ws="wsproto",  # Use wsproto instead of deprecated websockets
-            )
-
-            server = uvicorn.Server(uvicorn_config)
-            await server.serve()
-
-        except Exception as e:
-            logger.error(f"Web server task error: {e}")
-            self._shutdown_event.set()
-            raise
-        finally:
-            logger.info("Web server task completed")
-
-    async def _run_mcp_server(self, port: int) -> None:
-        """Run the MCP server in a task."""
-        logger.info(f"Starting MCP server task on port {port} with {self.config.transport.upper()} transport")
-        try:
-            # Run the MCP server with the configured transport
-            await self.mcp_server.app.run_http_async(
-                transport=self.config.transport, host=self.config.server_host, port=port, show_banner=True
-            )
-        except Exception as e:
-            logger.error(f"MCP server task error: {e}")
-            self._shutdown_event.set()
-            raise
-        finally:
-            logger.info("MCP server task completed")
+            logger.info("🔴 Unified server completed")
 
     async def shutdown(self) -> None:
         """Shutdown both servers gracefully."""

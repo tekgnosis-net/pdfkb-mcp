@@ -16,8 +16,7 @@ graph TB
     end
 
     subgraph "Interface Layer"
-        MCP_SERVER[MCP Server<br/>FastMCP Protocol]
-        WEB_SERVER[Web Server<br/>FastAPI + WebSocket]
+        UNIFIED_SERVER[Unified Server<br/>FastMCP + FastAPI<br/>Single Hypercorn Process]
     end
 
     subgraph "Processing Pipeline"
@@ -43,11 +42,10 @@ graph TB
         MONITOR[File Monitor<br/>Auto-detection]
     end
 
-    MCP_CLIENT --> MCP_SERVER
-    WEB_CLIENT --> WEB_SERVER
+    MCP_CLIENT --> UNIFIED_SERVER
+    WEB_CLIENT --> UNIFIED_SERVER
 
-    MCP_SERVER --> DOC_PROC
-    WEB_SERVER --> DOC_PROC
+    UNIFIED_SERVER --> DOC_PROC
 
     DOC_PROC --> PARSERS
     PARSERS --> CHUNKERS
@@ -62,13 +60,12 @@ graph TB
     VECTOR_DB --> HYBRID
     TEXT_IDX --> HYBRID
 
-    HYBRID --> MCP_SERVER
-    HYBRID --> WEB_SERVER
+    HYBRID --> UNIFIED_SERVER
 
     QUEUE --> DOC_PROC
     MONITOR --> QUEUE
 
-    WEB_SERVER -.->|WebSocket| WEB_CLIENT
+    UNIFIED_SERVER -.->|WebSocket| WEB_CLIENT
 
     classDef interface fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
     classDef processing fill:#fff9c4,stroke:#f57f17,stroke-width:2px
@@ -76,7 +73,7 @@ graph TB
     classDef search fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
     classDef background fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
 
-    class MCP_SERVER,WEB_SERVER interface
+    class UNIFIED_SERVER interface
     class DOC_PROC,PARSERS,CHUNKERS,EMBED processing
     class CACHE,VECTOR_DB,TEXT_IDX,DOC_CACHE storage
     class HYBRID search
@@ -85,32 +82,40 @@ graph TB
 
 ## Core Components
 
-### 1. MCP Server Implementation
+### 1. Unified Server Architecture
 
-**Location**: `src/pdfkb/main.py`
+**Location**: `src/pdfkb/web_server.py` + `src/pdfkb/main.py`
 
-The MCP server is built using FastMCP and provides the following tools:
-- `add_document`: Add documents (PDFs or Markdown) to the knowledgebase with optional metadata
-- `search_documents`: Hybrid search combining semantic and keyword matching
-- `list_documents`: List all documents with filtering capabilities
-- `remove_document`: Remove documents from the knowledgebase
+The system uses a unified server architecture that combines FastMCP and FastAPI in a single Hypercorn process:
+
+**MCP Server Component** (`src/pdfkb/main.py`):
+- Built using FastMCP and provides the following tools:
+  - `add_document`: Add documents (PDFs or Markdown) to the knowledgebase with optional metadata
+  - `search_documents`: Hybrid search combining semantic and keyword matching
+  - `list_documents`: List all documents with filtering capabilities
+  - `remove_document`: Remove documents from the knowledgebase
+- Exposed as ASGI application via `get_http_app()` method
+
+**Web Interface Component** (`src/pdfkb/web/`):
+- Modern FastAPI-based web server providing:
+  - RESTful API endpoints for document management
+  - WebSocket support for real-time updates
+  - File upload and drag-and-drop functionality
+  - Interactive search with suggestions
+  - System metrics and monitoring
+
+**Unified Integration** (`src/pdfkb/web_server.py`):
+- Mounts FastMCP ASGI app into FastAPI at `/mcp/` (HTTP) or `/sse/` (SSE)
+- Serves all endpoints on single port (default 8000)
+- Uses Hypercorn ASGI server for optimal WebSocket support
+- Eliminates resource overhead of dual servers
 
 **Key Features**:
 - Asynchronous processing with background queue
 - Intelligent configuration change detection
 - Multi-stage cache management
 - File monitoring for auto-processing
-
-### 2. Web Interface
-
-**Location**: `src/pdfkb/web/`
-
-A modern FastAPI-based web server providing:
-- RESTful API endpoints for document management
-- WebSocket support for real-time updates
-- File upload and drag-and-drop functionality
-- Interactive search with suggestions
-- System metrics and monitoring
+- Single-port deployment for simplified networking
 
 **Architecture**:
 - **Server**: `web/server.py` - FastAPI application setup
@@ -121,7 +126,7 @@ A modern FastAPI-based web server providing:
   - `websocket_manager.py`: Real-time communication
 - **Models**: `web/models/` - Pydantic models for API contracts
 
-### 3. Document Processing Pipeline
+### 2. Document Processing Pipeline
 
 **Location**: `src/pdfkb/document_processor.py`
 
@@ -463,15 +468,18 @@ graph TB
 
 #### Network Architecture
 
-**Port Exposure Patterns:**
-- **8000**: MCP HTTP/SSE transport (configurable)
-- **8080**: Web interface (optional, configurable)
-- **Health Endpoint**: `/health` for container orchestration
+**Unified Server Architecture:**
+- **Port 8000**: Unified server port serving both web interface and MCP endpoints
+  - Web interface: `http://localhost:8000/`
+  - MCP HTTP endpoints: `http://localhost:8000/mcp/`
+  - MCP SSE endpoints: `http://localhost:8000/sse/`
+  - API documentation: `http://localhost:8000/docs`
+  - Health endpoint: `http://localhost:8000/health`
 
 **Transport Modes:**
-- **HTTP Mode**: RESTful MCP protocol for modern clients (Cline)
-- **SSE Mode**: Server-Sent Events for legacy clients (Roo)
-- **Stdio Mode**: Standard I/O transport (not recommended for containers)
+- **HTTP Mode**: RESTful MCP protocol mounted at `/mcp/` for modern clients (Cline)
+- **SSE Mode**: Server-Sent Events mounted at `/sse/` for legacy clients (Roo)
+- **Stdio Mode**: Standard I/O transport for local MCP clients (Claude Desktop)
 
 #### Environment Configuration Management
 
@@ -479,9 +487,12 @@ graph TB
 # Core Configuration Variables
 PDFKB_KNOWLEDGEBASE_PATH: "/app/documents"
 PDFKB_CACHE_DIR: "/app/cache"
-PDFKB_TRANSPORT: "http"  # or "sse"
-PDFKB_SERVER_HOST: "0.0.0.0"
-PDFKB_SERVER_PORT: "8000"
+PDFKB_TRANSPORT: "stdio"  # "stdio", "http", or "sse"
+
+# Unified Server Configuration
+PDFKB_WEB_ENABLE: "false"  # Enable unified server (web + MCP endpoints)
+PDFKB_WEB_HOST: "0.0.0.0"
+PDFKB_WEB_PORT: "8000"
 
 # Embedding Provider Selection
 PDFKB_EMBEDDING_PROVIDER: "local"  # "openai", "huggingface"
@@ -490,7 +501,6 @@ PDFKB_LOCAL_EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
 # Feature Toggles
 PDFKB_ENABLE_HYBRID_SEARCH: "true"
 PDFKB_ENABLE_RERANKER: "false"
-PDFKB_WEB_ENABLE: "false"
 ```
 
 #### Deployment Patterns

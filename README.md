@@ -14,10 +14,11 @@ A Model Context Protocol (MCP) server that enables intelligent document search a
 
 ### 🌐 Remote Access & Multi-Client Support (NEW!)
 **Access your document repository from anywhere**
-- **SSE Transport Mode**: Server-Sent Events for real-time remote access
+- **Unified Server Architecture**: Single server serving both web interface and MCP endpoints
 - **HTTP Transport Mode**: RESTful API access for modern MCP clients
+- **SSE Transport Mode**: Server-Sent Events for real-time remote access
 - **Multi-Client Architecture**: Share document processing across multiple clients
-- **Integrated Web + MCP**: Run both web interface and MCP server concurrently
+- **Single Port Deployment**: Efficient resource usage with unified endpoints
 - **Flexible Deployment**: Local, remote, or hybrid deployment modes
 
 ### 🎯 Advanced Search & Intelligence
@@ -238,30 +239,34 @@ pdfkb-mcp
 - Most resource-efficient option
 - Best for pure MCP integration
 
-**2. MCP Only Mode - SSE/Remote Transport**:
+**2. MCP Only Mode - HTTP/SSE Transport**:
 ```bash
 # Option A: Environment variable
-PDFKB_TRANSPORT=sse pdfkb-mcp
+PDFKB_TRANSPORT=http pdfkb-mcp    # or sse
 
 # Option B: Command line flags
-pdfkb-mcp --transport sse --sse-port 8000 --sse-host localhost
+pdfkb-mcp --transport http        # or --transport sse
 ```
-- Runs MCP server in SSE mode for remote access from multiple clients
-- MCP server available at http://localhost:8000 (or configured host/port)
+- Runs MCP server in HTTP/SSE mode for remote access from multiple clients
+- MCP endpoints available for client connections
 - Best for centralized document processing accessible from multiple clients
 
-**3. Integrated Mode** (MCP + Web):
+**3. Unified Server Mode** (MCP + Web):
 ```bash
 # Option A: Environment variable
 PDFKB_WEB_ENABLE=true pdfkb-mcp
 
 # Option B: Command line flag
 pdfkb-mcp --enable-web
+
+# Option C: With HTTP/SSE transport
+PDFKB_WEB_ENABLE=true pdfkb-mcp --transport http
 ```
-- Runs both MCP server AND web interface concurrently
-- Web interface available at http://localhost:8080
-- MCP server runs in stdio mode by default (can be configured to SSE)
-- Best of both worlds: API integration + web UI
+- Runs unified server with both MCP endpoints AND web interface on same port
+- Web interface available at http://localhost:8000
+- MCP endpoints available at http://localhost:8000/mcp/ (HTTP) or http://localhost:8000/sse/ (SSE)
+- API documentation at http://localhost:8000/docs
+- Best of both worlds: API integration + web UI in single efficient server
 ### Web Interface Features
 
 ![PDF Knowledgebase Web Interface - Documents List](docs/images/web_documents_list.png)
@@ -285,13 +290,13 @@ pdfkb-mcp --enable-web
    PDFKB_WEB_ENABLE=true pdfkb-mcp  # Start integrated server
    ```
 
-2. **Open your browser**: http://localhost:8080
+2. **Open your browser**: http://localhost:8000
 
 3. **Configure environment** (create `.env` file):
    ```bash
    PDFKB_OPENAI_API_KEY=sk-proj-abc123def456ghi789...
    PDFKB_KNOWLEDGEBASE_PATH=/path/to/your/pdfs
-   PDFKB_WEB_PORT=8080
+   PDFKB_WEB_PORT=8000
    PDFKB_WEB_HOST=localhost
    PDFKB_WEB_ENABLE=true
    ```
@@ -300,9 +305,10 @@ pdfkb-mcp --enable-web
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `PDFKB_WEB_ENABLE` | `false` | Enable/disable web interface |
-| `PDFKB_WEB_PORT` | `8080` | Web server port |
-| `PDFKB_WEB_HOST` | `localhost` | Web server host |
+| `PDFKB_WEB_ENABLE` | `false` | Enable/disable unified server (web + MCP endpoints) |
+| `PDFKB_WEB_PORT` | `8000` | Unified server port |
+| `PDFKB_WEB_HOST` | `localhost` | Server host |
+| `PDFKB_TRANSPORT` | `stdio` | MCP transport: `stdio`, `http`, or `sse` |
 | `PDFKB_WEB_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins |
 
 ### Command Line Options
@@ -310,24 +316,24 @@ pdfkb-mcp --enable-web
 The server supports command line arguments:
 
 ```bash
-# Customize web server port with web interface enabled
-pdfkb-mcp --enable-web --port 9000
+# Enable unified server (web + MCP endpoints)
+pdfkb-mcp --enable-web
+
+# Enable unified server with HTTP transport
+pdfkb-mcp --enable-web --transport http
 
 # Use custom configuration file
 pdfkb-mcp --config myconfig.env
 
 # Change log level
 pdfkb-mcp --log-level DEBUG
-
-# Enable web interface via command line
-pdfkb-mcp --enable-web
 ```
 
 ### API Documentation
 
-When running with web interface enabled, comprehensive API documentation is available at:
-- **Swagger UI**: http://localhost:8080/docs
-- **ReDoc**: http://localhost:8080/redoc
+When running with unified server enabled, comprehensive API documentation is available at:
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 ## 🏗️ Architecture Overview
 
