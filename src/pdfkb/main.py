@@ -1004,13 +1004,18 @@ class PDFKnowledgebaseServer:
         except Exception as e:
             logger.error(f"Failed to save document cache: {e}")
 
-    def get_http_app(self):
+    def get_http_app(self, path: str = "/mcp"):
         """Get the FastMCP HTTP ASGI application for integration into FastAPI.
+
+        Args:
+            path: The mount path prefix where the MCP app will be served (e.g., "/mcp" or "/sse").
+                  This must match the path used when mounting into FastAPI so the internal
+                  routes are generated correctly.
 
         Returns:
             ASGI application instance that can be mounted in FastAPI
         """
-        return self.app.http_app()
+        return self.app.http_app(path=path)
 
     async def run(self) -> None:
         """Run the MCP server."""

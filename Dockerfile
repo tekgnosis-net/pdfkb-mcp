@@ -154,8 +154,6 @@ ENV PDFKB_EMBEDDING_PROVIDER=local \
     PDFKB_SERVER_HOST=0.0.0.0 \
     PDFKB_SERVER_PORT=8000 \
     PDFKB_WEB_ENABLE=false \
-    PDFKB_WEB_HOST=0.0.0.0 \
-    PDFKB_WEB_PORT=8080 \
     PDFKB_LOG_LEVEL=INFO \
     PDFKB_MAX_PARALLEL_PARSING=1 \
     PDFKB_MAX_PARALLEL_EMBEDDING=1 \
@@ -165,9 +163,8 @@ ENV PDFKB_EMBEDDING_PROVIDER=local \
     PDFKB_MODEL_CACHE_DIR=/app/cache/models
 
 # Expose default ports
-# 8000: MCP HTTP/SSE transport
-# 8080: Web interface (when enabled)
-EXPOSE 8000 8080
+# 8000: Unified web + mcp port
+EXPOSE 8000
 
 # Health check for container orchestration
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

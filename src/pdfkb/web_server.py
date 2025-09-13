@@ -156,8 +156,8 @@ class IntegratedPDFKnowledgebaseServer:
                 mount_path = "/mcp" if self.config.transport == "http" else "/sse"
                 logger.info(f"Mounting MCP server at {mount_path} with {self.config.transport.upper()} transport")
 
-                # Mount the MCP ASGI app into FastAPI
-                self.web_app.mount(mount_path, self.mcp_server.get_http_app())
+                # Mount the MCP ASGI app into FastAPI, ensuring internal routes know the mount prefix
+                self.web_app.mount(mount_path, self.mcp_server.get_http_app(path=mount_path))
 
                 logger.info(
                     f"MCP endpoints available at: http://{self.config.web_host}:{self.config.web_port}{mount_path}/"

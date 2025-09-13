@@ -91,14 +91,9 @@ validate_environment() {
         fi
     fi
 
-    # Validate port numbers
-    if [[ "${PDFKB_MCP_PORT:-8001}" -lt 1 || "${PDFKB_MCP_PORT:-8001}" -gt 65535 ]]; then
-        log_error "Invalid MCP port: ${PDFKB_MCP_PORT}. Must be between 1 and 65535"
-        exit 1
-    fi
-
+    # Validate unified server port
     if [[ "${PDFKB_WEB_PORT:-8000}" -lt 1 || "${PDFKB_WEB_PORT:-8000}" -gt 65535 ]]; then
-        log_error "Invalid web port: ${PDFKB_WEB_PORT}. Must be between 1 and 65535"
+        log_error "Invalid unified server port: ${PDFKB_WEB_PORT}. Must be between 1 and 65535"
         exit 1
     fi
 
@@ -154,23 +149,22 @@ show_configuration() {
     echo "  💾 Cache: ${PDFKB_CACHE_DIR:-/app/cache}"
     echo "  📊 Logs: ${PDFKB_LOG_DIR:-/app/logs}"
     echo "  🔗 Transport: ${PDFKB_TRANSPORT:-http}"
-    echo "  📡 MCP Server: ${PDFKB_SERVER_HOST:-0.0.0.0}:${PDFKB_MCP_PORT:-8001}"
     echo "  🧠 Embeddings: ${PDFKB_EMBEDDING_PROVIDER:-local}"
     echo "  📚 Model: ${PDFKB_LOCAL_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}"
     echo "  🔍 Hybrid Search: ${PDFKB_ENABLE_HYBRID_SEARCH:-true}"
     echo "  🌐 Web Interface: ${PDFKB_WEB_ENABLE:-false}"
     if [[ "${PDFKB_WEB_ENABLE:-false}" == "true" ]]; then
-        echo "  🌍 Web Server: ${PDFKB_WEB_HOST:-0.0.0.0}:${PDFKB_WEB_PORT:-8000}"
+        echo "  🌍 Unified Server: ${PDFKB_WEB_HOST:-0.0.0.0}:${PDFKB_WEB_PORT:-8000} (Web + MCP endpoints)"
     fi
     echo "  📄 Parser: ${PDFKB_PDF_PARSER:-pymupdf4llm}"
     echo "  ✂️  Chunker: ${PDFKB_DOCUMENT_CHUNKER:-langchain}"
     echo "  📝 Log Level: ${PDFKB_LOG_LEVEL:-INFO}"
 }
 
-# Health check endpoint setup (for HTTP transport)
+# Health check endpoint setup (for unified server)
 setup_health_check() {
-    if [[ "${PDFKB_TRANSPORT:-http}" =~ ^(http|sse)$ ]]; then
-        log_info "Health check will be available at: http://localhost:${PDFKB_MCP_PORT:-8001}/health"
+    if [[ "${PDFKB_WEB_ENABLE:-false}" == "true" ]]; then
+        log_info "Health check will be available at: http://localhost:${PDFKB_WEB_PORT:-8000}/health"
     fi
 }
 
@@ -208,15 +202,8 @@ main() {
             cmd_args+=("--transport" "${PDFKB_TRANSPORT}")
         fi
 
-        # Add server configuration for HTTP/SSE modes
-        if [[ "${PDFKB_TRANSPORT:-http}" =~ ^(http|sse)$ ]]; then
-            if [[ -n "${PDFKB_SERVER_HOST:-}" ]]; then
-                cmd_args+=("--server-host" "${PDFKB_SERVER_HOST}")
-            fi
-            if [[ -n "${PDFKB_MCP_PORT:-}" ]]; then
-                cmd_args+=("--mcp-port" "${PDFKB_MCP_PORT}")
-            fi
-        fi
+        # No separate server configuration needed for unified server
+        # All configuration is handled via environment variables
 
         # Add web interface flag if enabled
         if [[ "${PDFKB_WEB_ENABLE:-false}" == "true" ]]; then
