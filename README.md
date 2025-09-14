@@ -1519,7 +1519,7 @@ podman run -d \
   -v "$(pwd)/cache:/app/cache" \
   -e PDFKB_EMBEDDING_PROVIDER=local \
   -e PDFKB_TRANSPORT=http \
-  pdfkb-mcp:latest
+  ghcr.io/juanqui/pdfkb-mcp:latest
 
 # Or with Docker
 docker run -d \
@@ -1529,7 +1529,7 @@ docker run -d \
   -v "$(pwd)/cache:/app/cache" \
   -e PDFKB_EMBEDDING_PROVIDER=local \
   -e PDFKB_TRANSPORT=http \
-  pdfkb-mcp:latest
+  ghcr.io/juanqui/pdfkb-mcp:latest
 ```
 
 **2. Using Compose (Recommended: Podman)**:
@@ -1654,7 +1654,7 @@ podman run -d \
   -v "pdfkb-logs:/app/logs" \
   -e PDFKB_EMBEDDING_PROVIDER=local \
   -e PDFKB_WEB_ENABLE=true \
-  pdfkb-mcp:latest
+  ghcr.io/juanqui/pdfkb-mcp:latest
 
 # Or with Docker
 docker run -d \
@@ -1665,7 +1665,7 @@ docker run -d \
   -v "pdfkb-logs:/app/logs" \
   -e PDFKB_EMBEDDING_PROVIDER=local \
   -e PDFKB_WEB_ENABLE=true \
-  pdfkb-mcp:latest
+  ghcr.io/juanqui/pdfkb-mcp:latest
 ```
 
 #### Port Configuration
@@ -1882,8 +1882,8 @@ netstat -tulpn | grep :8000
 lsof -i :8000
 
 # Use different ports
-podman run -p 8001:8000 -p 8081:8080 pdfkb-mcp:latest   # Podman
-# or: docker run -p 8001:8000 -p 8081:8080 pdfkb-mcp:latest  # Docker
+podman run -p 8001:8000 -p 8081:8080 ghcr.io/juanqui/pdfkb-mcp:latest   # Podman
+# or: docker run -p 8001:8000 -p 8081:8080 ghcr.io/juanqui/pdfkb-mcp:latest  # Docker
 ```
 
 **3. Memory Issues**:
@@ -1919,7 +1919,7 @@ podman run -it \
   -v "$(pwd)/documents:/app/documents:rw" \
   -e PDFKB_LOG_LEVEL=DEBUG \
   -e PDFKB_EMBEDDING_PROVIDER=local \
-  pdfkb-mcp:latest
+  ghcr.io/juanqui/pdfkb-mcp:latest
 
 # Or with Docker
 docker run -it \
@@ -1927,7 +1927,7 @@ docker run -it \
   -v "$(pwd)/documents:/app/documents:rw" \
   -e PDFKB_LOG_LEVEL=DEBUG \
   -e PDFKB_EMBEDDING_PROVIDER=local \
-  pdfkb-mcp:latest
+  ghcr.io/juanqui/pdfkb-mcp:latest
 
 # Use development compose
 podman-compose -f docker-compose.dev.yml up   # or: docker compose -f docker-compose.dev.yml up

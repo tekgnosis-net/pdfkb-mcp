@@ -10,7 +10,7 @@ services:
     # ═══════════════════════════════════════════════════════════════════════════════════════════
 
     # Use the latest pdfkb-mcp image (replace with specific version if needed)
-    image: pdfkb-mcp:latest
+    image: ghcr.io/juanqui/pdfkb-mcp:latest
 
     # Uncomment to build from source instead:
     # build:

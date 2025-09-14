@@ -9,9 +9,6 @@ The `pdfkb-mcp` Docker images are automatically built and published to the GitHu
 ### Image Tags
 
 - **Latest stable**: `ghcr.io/juanqui/pdfkb-mcp:latest`
-- **Main branch**: `ghcr.io/juanqui/pdfkb-mcp:main`
-- **Specific versions**: `ghcr.io/juanqui/pdfkb-mcp:v0.7.0`
-- **Major/minor versions**: `ghcr.io/juanqui/pdfkb-mcp:0.7`
 
 ## 🚀 Quick Start
 
