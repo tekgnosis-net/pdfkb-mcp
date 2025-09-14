@@ -121,6 +121,7 @@ node_modules/
 Dockerfile*
 docker-compose*.yml
 .dockerignore
+build-docker.sh
 
 # CI/CD
 .github/

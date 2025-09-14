@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for pdfkb-mcp MCP Server
 # Optimized for size, security, and performance
-# Base image: python:3.11-slim for best compatibility with ML libraries
+# Base image: python:3.11-slim with CPU-only PyTorch for optimal size/compatibility balance
 
 # Build arguments for customization
 ARG PYTHON_VERSION=3.11
@@ -47,14 +47,17 @@ COPY src/ src/
 COPY README.md .
 
 # Install UV (Rust-based Python package installer) for faster builds
-RUN pip install --upgrade uv
+RUN pip install --no-cache-dir --upgrade uv
 
-# Install the package with all dependencies from pyproject.toml
-# This eliminates the need to manually specify dependencies in the Dockerfile
-RUN uv pip install --system --no-cache -e .
+# Install CPU-only PyTorch first to avoid CUDA dependencies
+RUN uv pip install --system --no-cache \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision torchaudio
 
-# Build wheels for all dependencies to use in runtime stage
-RUN uv pip freeze --system > requirements.txt && pip wheel --wheel-dir /build/wheels -r requirements.txt
+# Install the package with remaining dependencies from pyproject.toml
+# PyTorch is now already installed with CPU-only support
+RUN uv pip install --system --no-cache -e . \
+    && pip uninstall -y pip setuptools wheel uv  # Remove build tools to save space
 
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
@@ -62,6 +65,7 @@ RUN uv pip freeze --system > requirements.txt && pip wheel --wheel-dir /build/wh
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # Build arguments
+ARG PYTHON_VERSION
 ARG PDFKB_VERSION
 ARG BUILD_DATE
 ARG VCS_REF
@@ -76,7 +80,7 @@ LABEL org.opencontainers.image.title="pdfkb-mcp" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.authors="Juan Villa <juanqui@villafam.com>"
 
-# Install only runtime system dependencies
+# Install only runtime system dependencies with aggressive cleanup
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Essential runtime libraries
     libc6 \
@@ -86,9 +90,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     # SSL/TLS certificates
     ca-certificates \
-    # Clean up package cache
+    # Aggressive cleanup to minimize image size
     && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /var/cache/apt/archives/*
+    && rm -rf /var/cache/apt/archives/* \
+    && rm -rf /var/cache/apt/archives/partial/* \
+    && rm -rf /var/log/apt/* \
+    && rm -rf /var/log/dpkg.log \
+    && rm -rf /root/.cache \
+    && find /usr/local -name "*.pyc" -delete \
+    && find /usr/local -name "__pycache__" -type d -exec rm -rf {} + || true
 
 # Create non-root user for security
 RUN groupadd -r -g 1001 pdfkb && \
@@ -124,22 +134,21 @@ USER pdfkb
 # Set working directory
 WORKDIR ${PDFKB_APP_DIR}
 
-# Copy wheels from builder stage
-COPY --from=builder --chown=pdfkb:pdfkb /build/wheels /tmp/wheels
-
-# Install Python packages from wheels (as root for system install)
-USER root
-RUN pip install --upgrade uv
-RUN uv pip install --system --no-cache --no-index --find-links /tmp/wheels \
-    # Use the wheels we built in the previous stage
-    pdfkb-mcp \
-    && rm -rf /tmp/wheels
-USER pdfkb
+# Copy Python packages and installed libraries from builder stage
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application source code
 COPY --chown=pdfkb:pdfkb src/ src/
 COPY --chown=pdfkb:pdfkb pyproject.toml .
 COPY --chown=pdfkb:pdfkb README.md .
+
+# Final cleanup to minimize image size
+USER root
+RUN rm -rf /root/.cache \
+    && rm -rf /tmp/* \
+    && find /usr/local -name "*.pyc" -delete \
+    && find /usr/local -name "__pycache__" -type d -exec rm -rf {} + || true
 
 # Copy entrypoint script
 COPY --chown=pdfkb:pdfkb docker-entrypoint.sh /app/docker-entrypoint.sh
@@ -150,6 +159,7 @@ RUN chmod +x /app/docker-entrypoint.sh
 USER pdfkb
 
 # Default environment variables for container deployment
+# Models are downloaded dynamically on first use (not pre-installed)
 ENV PDFKB_EMBEDDING_PROVIDER=local \
     PDFKB_LOCAL_EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B" \
     PDFKB_ENABLE_HYBRID_SEARCH=true \
