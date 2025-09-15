@@ -984,19 +984,31 @@ class DocumentProcessor:
             DocumentSummary if summarization is successful, None otherwise.
         """
         if not self.summarizer_service:
+            logger.debug(f"No summarizer service available for {filename}")
             return None
 
         try:
             # Get content for summarization (limited by max_pages setting)
             content_for_summary = self._prepare_content_for_summary(parse_result)
+            logger.debug(f"Content length for summarization of {filename}: {len(content_for_summary)} chars")
 
             if not content_for_summary or len(content_for_summary.strip()) < 100:
-                logger.warning(f"Insufficient content for summarization: {filename}")
+                logger.warning(
+                    f"Insufficient content for summarization: {filename} (length: {len(content_for_summary)})"
+                )
                 return None
 
             logger.info(f"→ Generating document summary for: {filename}")
             summary = await self.summarizer_service.summarize_document(content_for_summary, filename)
-            logger.info("✓ Document summary generated")
+
+            if summary:
+                logger.info(f"✓ Document summary generated for {filename}:")
+                logger.info(f"  Title: {getattr(summary, 'title', 'N/A')}")
+                logger.info(f"  Short description: {getattr(summary, 'short_description', 'N/A')[:100]}...")
+                logger.info(f"  Long description length: {len(getattr(summary, 'long_description', '') or '')} chars")
+            else:
+                logger.warning(f"Summarizer returned None/empty result for {filename}")
+
             return summary
 
         except Exception as e:

@@ -90,6 +90,26 @@ class IntelligentCacheManager:
         fingerprint_string = json.dumps(embedding_params, sort_keys=True)
         return hashlib.sha256(fingerprint_string.encode("utf-8")).hexdigest()
 
+    def get_summarizer_fingerprint(self) -> str:
+        """Generate fingerprint for summarizer configuration.
+
+        Returns:
+            SHA-256 hash of summarizer-related parameters.
+        """
+        summarizer_params = {
+            "enable_summarizer": self.config.enable_summarizer,
+            "summarizer_provider": self.config.summarizer_provider,
+            "summarizer_model": self.config.summarizer_model,
+            "summarizer_max_pages": self.config.summarizer_max_pages,
+            "summarizer_device": self.config.summarizer_device,
+            "summarizer_model_cache_dir": self.config.summarizer_model_cache_dir,
+            "summarizer_api_base": self.config.summarizer_api_base,
+            "summarizer_api_key": self.config.summarizer_api_key,
+        }
+
+        fingerprint_string = json.dumps(summarizer_params, sort_keys=True)
+        return hashlib.sha256(fingerprint_string.encode("utf-8")).hexdigest()
+
     def _get_fingerprint_path(self, stage: str) -> Path:
         """Get the path to a stage-specific fingerprint file.
 
@@ -157,7 +177,8 @@ class IntelligentCacheManager:
             {
                 "parsing": bool,
                 "chunking": bool,
-                "embedding": bool
+                "embedding": bool,
+                "summarizer": bool
             }
         """
         changes = {}
@@ -176,6 +197,11 @@ class IntelligentCacheManager:
         current_embedding = self.get_embedding_fingerprint()
         saved_embedding = self._load_stage_fingerprint("embedding")
         changes["embedding"] = not saved_embedding or current_embedding != saved_embedding.get("fingerprint")
+
+        # Check summarizer changes
+        current_summarizer = self.get_summarizer_fingerprint()
+        saved_summarizer = self._load_stage_fingerprint("summarizer")
+        changes["summarizer"] = not saved_summarizer or current_summarizer != saved_summarizer.get("fingerprint")
 
         return changes
 
@@ -225,6 +251,19 @@ class IntelligentCacheManager:
         }
         self._save_stage_fingerprint("embedding", self.get_embedding_fingerprint(), embedding_config)
 
+        # Save summarizer fingerprint
+        summarizer_config = {
+            "enable_summarizer": self.config.enable_summarizer,
+            "summarizer_provider": self.config.summarizer_provider,
+            "summarizer_model": self.config.summarizer_model,
+            "summarizer_max_pages": self.config.summarizer_max_pages,
+            "summarizer_device": self.config.summarizer_device,
+            "summarizer_model_cache_dir": self.config.summarizer_model_cache_dir,
+            "summarizer_api_base": self.config.summarizer_api_base,
+            "summarizer_api_key": self.config.summarizer_api_key,
+        }
+        self._save_stage_fingerprint("summarizer", self.get_summarizer_fingerprint(), summarizer_config)
+
     def is_parsing_cache_valid(self, document_hash: str) -> bool:
         """Check if parsing cache is valid for a document.
 
@@ -267,6 +306,20 @@ class IntelligentCacheManager:
         changes = self.detect_config_changes()
         return not changes["embedding"]
 
+    def is_summarizer_cache_valid(self, document_hash: str) -> bool:
+        """Check if summarizer cache is valid for a document.
+
+        Args:
+            document_hash: Hash identifier for the document.
+
+        Returns:
+            True if summarizer cache is valid, False otherwise.
+        """
+        # For now, just check if summarizer config hasn't changed
+        # Future implementation could include document-specific validation
+        changes = self.detect_config_changes()
+        return not changes["summarizer"]
+
     def get_stage_fingerprint_info(self, stage: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a stage's fingerprint.
 
@@ -294,5 +347,5 @@ class IntelligentCacheManager:
 
     def clear_all_fingerprints(self) -> None:
         """Clear all stage fingerprints."""
-        for stage in ["parsing", "chunking", "embedding"]:
+        for stage in ["parsing", "chunking", "embedding", "summarizer"]:
             self.clear_stage_fingerprint(stage)

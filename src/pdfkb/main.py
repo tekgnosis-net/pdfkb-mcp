@@ -149,11 +149,11 @@ class PDFKnowledgebaseServer:
                 self.config.knowledgebase_path,
                 self.config.cache_dir,
             )
+            # Load document metadata cache BEFORE re-processing (needed for re-summarization)
+            await self._load_document_cache()
+
             # Handle re-processing of cached documents after components are initialized
             await self._handle_post_initialization_reprocessing()
-
-            # Load document metadata cache
-            await self._load_document_cache()
 
             # Update intelligent cache fingerprints
             self.cache_manager.update_fingerprints()
@@ -232,6 +232,11 @@ class PDFKnowledgebaseServer:
             elif changes["embedding"]:
                 logger.info("Embedding configuration changed - clearing embedding caches only")
                 await self._reset_embedding_caches()
+
+            # Handle summarizer-only changes - no cache operations needed
+            elif changes["summarizer"]:
+                logger.info("Summarizer configuration changed - will re-summarize documents")
+                # No cache clearing needed for summarizer changes
 
             logger.info("Selective cache invalidation complete")
 
@@ -363,6 +368,198 @@ class PDFKnowledgebaseServer:
             logger.error(f"Error resetting embedding caches: {e}")
             raise ConfigurationError(f"Failed to reset embedding caches: {e}")
 
+    async def _resummarize_existing_documents(self) -> None:
+        """Re-summarize existing documents with new summarizer configuration.
+
+        This method only generates new summaries using cached parsing results,
+        without re-parsing, re-chunking, or re-embedding documents.
+        """
+        try:
+            logger.info("Re-summarizing existing documents with new summarizer configuration...")
+
+            # Skip if no summarizer service is available
+            if not self.document_processor or not self.document_processor.summarizer_service:
+                logger.info("No summarizer service available, skipping re-summarization")
+                return
+
+            # Ensure document cache is synchronized with vector store before re-summarization
+            logger.info("Synchronizing document cache with vector store before re-summarization...")
+            await self._synchronize_document_cache_with_vector_store()
+
+            # Get all documents directly from the vector store (not from cache)
+            documents_data = await self.vector_store.list_documents()
+            if not documents_data:
+                logger.info("No documents found to re-summarize")
+                return
+
+            logger.info(f"Found {len(documents_data)} documents to re-summarize")
+            resummarized_count = 0
+
+            for doc_data in documents_data:
+                try:
+                    doc_id = doc_data["id"]
+                    doc_title = doc_data["title"]
+                    doc_path = doc_data["path"]
+                    logger.info(f"Processing document for re-summarization: {doc_id} ({doc_title}) at {doc_path}")
+
+                    # Skip if we don't have a valid path
+                    if not doc_path or doc_path == "":
+                        logger.warning(f"Skipping document {doc_id} - no valid path")
+                        continue
+
+                    file_path = Path(doc_path)
+
+                    # Check if file still exists
+                    if not file_path.exists():
+                        logger.warning(f"Skipping document {doc_id} - file no longer exists: {doc_path}")
+                        continue
+
+                    # Try to load cached parsing result instead of re-parsing
+                    logger.info(f"Loading cached parsing result for: {file_path}")
+                    cached_parse_result = await self._load_cached_parsing_result(file_path)
+
+                    if not cached_parse_result:
+                        logger.warning(f"No cached parsing result found for {doc_path}, skipping summarization")
+                        continue
+
+                    logger.info(f"Found cached parsing result, generating summary for: {file_path.name}")
+                    # Generate new summary using cached content
+                    summary_data = await self.document_processor._generate_document_summary(
+                        cached_parse_result, file_path.name
+                    )
+
+                    if summary_data:
+                        logger.info(f"Summary generated successfully for {doc_title}")
+
+                        # Find the document in cache by path (since IDs might not match)
+                        cached_document = None
+                        cached_doc_id = None
+
+                        # First try by document ID
+                        if doc_id in self._document_cache:
+                            cached_document = self._document_cache[doc_id]
+                            cached_doc_id = doc_id
+                            logger.debug(f"Found document by ID: {doc_id}")
+                        else:
+                            # Try to find by path if ID doesn't match
+                            for cache_doc_id, cache_doc in self._document_cache.items():
+                                if cache_doc.path == doc_path:
+                                    cached_document = cache_doc
+                                    cached_doc_id = cache_doc_id
+                                    logger.info(f"Found document by path match: {doc_path} -> {cache_doc_id}")
+                                    break
+
+                        if cached_document and cached_doc_id:
+                            old_title = cached_document.title
+                            # Update summary metadata
+                            if summary_data.title and len(summary_data.title) > 5:
+                                cached_document.title = summary_data.title
+                                logger.info(f"Updated title from '{old_title}' to '{cached_document.title}'")
+                            cached_document.metadata.update(
+                                {
+                                    "short_description": summary_data.short_description,
+                                    "long_description": summary_data.long_description,
+                                    "summary_generated": True,
+                                }
+                            )
+                            resummarized_count += 1
+                            logger.info(f"Successfully re-summarized document: {doc_title} (cache ID: {cached_doc_id})")
+                        else:
+                            logger.warning(f"Document not found in cache by ID ({doc_id}) or path ({doc_path})")
+                            logger.debug(f"Available cache IDs: {list(self._document_cache.keys())}")
+                    else:
+                        logger.warning(f"No summary generated for document: {doc_title}")
+
+                except Exception as e:
+                    logger.error(f"Failed to re-summarize document {doc_data.get('id', 'unknown')}: {e}")
+                    import traceback
+
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+
+            # Save the updated document cache if we have any documents there
+            if resummarized_count > 0 and self._document_cache:
+                await self._save_document_cache()
+
+            logger.info(f"Completed re-summarizing {resummarized_count} out of {len(documents_data)} documents")
+
+        except Exception as e:
+            logger.error(f"Error re-summarizing documents: {e}")
+            # Don't raise - let system continue
+
+    async def _load_cached_parsing_result(self, file_path: Path):
+        """Load cached parsing result for a file without re-parsing.
+
+        For PDF files, loads from cache. For Markdown files, re-parses on the fly
+        since Markdown parsing is fast and not cached during normal processing.
+
+        Args:
+            file_path: Path to the document file.
+
+        Returns:
+            ParseResult if cached result exists or can be generated, None otherwise.
+        """
+        try:
+            logger.debug(f"Attempting to load cached parsing result for: {file_path}")
+
+            # Calculate file checksum
+            checksum = await self.document_processor._calculate_checksum(file_path)
+            logger.debug(f"Calculated checksum for {file_path}: {checksum}")
+
+            # Handle different file types
+            suffix = file_path.suffix.lower()
+
+            if suffix == ".pdf":
+                # For PDF files, try to load from cache
+                parse_result = await self.document_processor._load_parsing_result(file_path, checksum)
+
+                if parse_result:
+                    logger.info(f"Successfully loaded cached parsing result for PDF: {file_path}")
+                    page_count = len(parse_result.pages) if hasattr(parse_result, "pages") else "unknown"
+                    logger.debug(f"Parse result has {page_count} pages")
+                    return parse_result
+                else:
+                    logger.warning(f"No cached parsing result found for PDF: {file_path}")
+                    return None
+
+            elif suffix in [".md", ".markdown"]:
+                # For Markdown files, re-parse on the fly since parsing is fast
+                logger.info(f"Re-parsing Markdown file for summarization: {file_path}")
+
+                # Import MarkdownParser and create parse result
+                from .parsers.parser_markdown import MarkdownParser
+
+                markdown_config = {
+                    "parse_frontmatter": getattr(self.config, "markdown_parse_frontmatter", True),
+                    "extract_title": getattr(self.config, "markdown_extract_title", True),
+                    "page_boundary_pattern": getattr(
+                        self.config, "markdown_page_boundary_pattern", r"--\[PAGE:\s*(\d+)\]--"
+                    ),
+                    "split_on_page_boundaries": getattr(self.config, "markdown_split_on_page_boundaries", True),
+                }
+
+                markdown_parser = MarkdownParser(config=markdown_config)
+                parse_result = await markdown_parser.parse(file_path)
+
+                if parse_result:
+                    logger.info(f"Successfully re-parsed Markdown file for summarization: {file_path}")
+                    page_count = len(parse_result.pages) if hasattr(parse_result, "pages") else "unknown"
+                    logger.debug(f"Parse result has {page_count} pages")
+                    return parse_result
+                else:
+                    logger.warning(f"Failed to re-parse Markdown file: {file_path}")
+                    return None
+
+            else:
+                logger.warning(f"Unsupported file type for re-summarization: {suffix}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to load cached parsing result for {file_path}: {e}")
+            import traceback
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+
     async def _handle_post_initialization_reprocessing(self) -> None:
         """Handle re-processing of cached documents after components are initialized."""
         try:
@@ -375,6 +572,10 @@ class PDFKnowledgebaseServer:
             # Only re-process if chunking or embedding changed (parsing changes do full reset)
             if changes.get("chunking") or changes.get("embedding"):
                 await self._reprocess_existing_documents()
+
+            # Re-summarize documents if summarizer configuration changed
+            if changes.get("summarizer"):
+                await self._resummarize_existing_documents()
 
             # Clear the stored changes
             self._config_changes = None
@@ -1184,6 +1385,69 @@ class PDFKnowledgebaseServer:
                 logger.info(f"Populated document cache with {len(self._document_cache)} documents from vector store")
         except Exception as e:
             logger.error(f"Failed to populate document cache from vector store: {e}")
+
+    async def _synchronize_document_cache_with_vector_store(self) -> None:
+        """Synchronize document cache with vector store to ensure consistency.
+
+        This method ensures that all documents in the vector store are also present
+        in the document cache, adding missing ones with basic information.
+        """
+        try:
+            logger.debug("Synchronizing document cache with vector store...")
+
+            # Get all documents from vector store
+            vector_store_docs = await self.vector_store.list_documents()
+            vector_store_ids = {doc["id"] for doc in vector_store_docs}
+
+            # Get all document IDs from cache
+            cache_ids = set(self._document_cache.keys())
+
+            # Find missing documents (in vector store but not in cache)
+            missing_ids = vector_store_ids - cache_ids
+
+            if missing_ids:
+                logger.info(f"Found {len(missing_ids)} documents in vector store that are missing from cache")
+
+                # Add missing documents to cache
+                for doc_info in vector_store_docs:
+                    if doc_info["id"] in missing_ids:
+                        try:
+                            # Create document with available info from vector store
+                            doc = Document(
+                                id=doc_info["id"],
+                                path=doc_info["path"],
+                                title=doc_info["title"],
+                                # Add other fields if available
+                                checksum=doc_info.get("checksum", ""),
+                                file_size=doc_info.get("file_size", 0),
+                                page_count=doc_info.get("page_count", 0),
+                                metadata=doc_info.get("metadata", {}),
+                            )
+                            self._document_cache[doc.id] = doc
+                            logger.debug(f"Added missing document to cache: {doc.id} ({doc.title})")
+                        except Exception as e:
+                            logger.warning(f"Failed to add document {doc_info['id']} to cache: {e}")
+
+                # Save updated cache
+                await self._save_document_cache()
+                logger.info(f"Synchronized document cache: added {len(missing_ids)} missing documents")
+            else:
+                logger.debug("Document cache is already synchronized with vector store")
+
+            # Also check for documents in cache but not in vector store (cleanup)
+            orphaned_ids = cache_ids - vector_store_ids
+            if orphaned_ids:
+                logger.warning(f"Found {len(orphaned_ids)} documents in cache that are not in vector store")
+                for orphaned_id in orphaned_ids:
+                    logger.debug(f"Removing orphaned document from cache: {orphaned_id}")
+                    del self._document_cache[orphaned_id]
+
+                # Save cleaned cache
+                await self._save_document_cache()
+                logger.info(f"Cleaned document cache: removed {len(orphaned_ids)} orphaned documents")
+
+        except Exception as e:
+            logger.error(f"Failed to synchronize document cache with vector store: {e}")
 
     async def _update_document_cache(self, document: Document) -> None:
         """Callback function to update the document cache when file monitor processes a document.

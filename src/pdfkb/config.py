@@ -1022,6 +1022,15 @@ class ServerConfig:
         cache_manager = self.get_intelligent_cache_manager()
         return cache_manager.get_embedding_fingerprint()
 
+    def get_summarizer_fingerprint(self) -> str:
+        """Generate fingerprint for summarizer configuration using intelligent cache manager.
+
+        Returns:
+            SHA-256 hash of summarizer-related parameters.
+        """
+        cache_manager = self.get_intelligent_cache_manager()
+        return cache_manager.get_summarizer_fingerprint()
+
     def detect_config_changes(self) -> Dict[str, bool]:
         """Detect which processing stages have configuration changes.
 
@@ -1030,7 +1039,8 @@ class ServerConfig:
             {
                 "parsing": bool,
                 "chunking": bool,
-                "embedding": bool
+                "embedding": bool,
+                "summarizer": bool
             }
         """
         cache_manager = self.get_intelligent_cache_manager()
@@ -1074,3 +1084,12 @@ class ServerConfig:
         """
         changes = self.detect_config_changes()
         return changes["embedding"]
+
+    def has_summarizer_config_changed(self) -> bool:
+        """Check if summarizer configuration has changed.
+
+        Returns:
+            True if summarizer configuration has changed.
+        """
+        changes = self.detect_config_changes()
+        return changes["summarizer"]
