@@ -56,7 +56,11 @@ RUN uv pip install --system --no-cache \
 
 # Install the package with remaining dependencies from pyproject.toml
 # PyTorch is now already installed with CPU-only support
+# Install all optional dependencies (use with caution - very large)
+# Needed as optionals are not working in the docker image
+
 RUN uv pip install --system --no-cache -e . \
+    && pip install -e ".[all]" \
     && pip uninstall -y pip setuptools wheel uv  # Remove build tools to save space
 
 # ============================================================================
