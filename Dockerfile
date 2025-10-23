@@ -5,6 +5,7 @@
 # Build arguments for customization
 ARG PYTHON_VERSION=3.11
 ARG PDFKB_VERSION=latest
+ARG PDF_PARSER=marker  # Options: marker, mineru
 
 # ============================================================================
 # Stage 1: Builder - Install build dependencies and compile packages
@@ -54,13 +55,24 @@ RUN uv pip install --system --no-cache \
     --index-url https://download.pytorch.org/whl/cpu \
     torch torchvision torchaudio
 
+# Build arguments
+ARG PYTHON_VERSION
+ARG BUILDPLATFORM
+ARG PDF_PARSER
+
 # Install the package with remaining dependencies from pyproject.toml
 # PyTorch is now already installed with CPU-only support
 # Install all optional dependencies (use with caution - very large)
 # Needed as optionals are not working in the docker image
 
 RUN uv pip install --system --no-cache -e . \
-    && uv pip install --system --no-cache -e ".[all-with-marker]" \
+    && if [ "$PDF_PARSER" = "mineru" ]; then \
+        uv pip install --system --no-cache -e ".[all-with-mineru]"; \
+    elif [ "$PDF_PARSER" = "marker" ]; then \
+        uv pip install --system --no-cache -e ".[all-with-marker]"; \
+    else \
+        uv pip install --system --no-cache -e ".[all-with-marker]"; \
+    fi \
     && pip uninstall -y pip setuptools wheel uv  # Remove build tools to save space
 
 # ============================================================================
