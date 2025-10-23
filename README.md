@@ -57,17 +57,17 @@ Get up and running in minutes using Docker/Podman with DeepInfra as your AI prov
 
 Choose the appropriate Docker image based on your PDF parsing needs:
 
-- **`latest`** (or **`marker-latest`**) - **Recommended for most users**
-  - Uses `marker-pdf` for balanced PDF parsing performance
-  - Good balance of speed and accuracy for general documents
-  - Compatible with most PDF types and layouts
+- **`latest`** (or **`marker-latest`**) - **Recommended for most users, including academic/research**
+  - Uses `marker-pdf` for high-quality PDF parsing with OCR
+  - Excellent for academic papers, research documents, and complex layouts
+  - Good balance of speed and accuracy for most document types
 
-- **`mineru-latest`** - **Best for academic/research documents**
+- **`mineru-latest`** - **GPU-accelerated alternative**
   - Uses `mineru` (MinerU) for advanced academic paper parsing
   - Superior handling of complex layouts, tables, and mathematical content
-  - Slower processing but higher accuracy for technical documents
+  - May offer different performance characteristics for specific use cases
 
-**💡 Pro Tip**: Start with `latest` (marker-pdf) for most use cases. Switch to `mineru-latest` if you work with academic papers, research documents, or complex technical PDFs with tables and formulas.
+**💡 Pro Tip**: Start with `latest` (marker-pdf) for most use cases including academic documents. The documentation examples use marker-pdf for academic/research setups.
 
 ### Prerequisites
 - **Container Runtime**: Docker or Podman installed
