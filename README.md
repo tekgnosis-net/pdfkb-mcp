@@ -62,7 +62,7 @@ Get up and running in minutes using Docker/Podman with DeepInfra as your AI prov
 
 ```bash
 # Download configuration and create directories
-curl -o docker-compose.yml https://raw.githubusercontent.com/juanqui/pdfkb-mcp/main/docker-compose.sample.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/tekgnosis-net/pdfkb-mcp/main/docker-compose.sample.yml
 mkdir -p ./documents ./cache ./logs
 
 # Edit docker-compose.yml and update:
