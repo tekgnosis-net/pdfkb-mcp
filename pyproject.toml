@@ -151,7 +151,7 @@ llm = [
     "httpx>=0.28.1",
     "PyMuPDF>=1.26.3",
     "Jinja2>=3.1.6",
-    "Pillow>=11.0.0",
+    "Pillow>=10.1.0",
 ]
 
 unstructured_chunker = [
@@ -173,7 +173,6 @@ all = [
     "pdfkb-mcp[pymupdf4llm]",
     "pdfkb-mcp[langchain]",
     "pdfkb-mcp[mineru]",
-    "pdfkb-mcp[marker]",
     "pdfkb-mcp[docling-complete]",
     "pdfkb-mcp[llm]",
     "pdfkb-mcp[unstructured_chunker]",
