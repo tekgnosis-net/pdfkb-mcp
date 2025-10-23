@@ -53,6 +53,22 @@ Once your setup is complete, you'll have access to a modern web interface for do
 
 Get up and running in minutes using Docker/Podman with DeepInfra as your AI provider.
 
+### Docker Image Tags
+
+Choose the appropriate Docker image based on your PDF parsing needs:
+
+- **`latest`** (or **`marker-latest`**) - **Recommended for most users**
+  - Uses `marker-pdf` for balanced PDF parsing performance
+  - Good balance of speed and accuracy for general documents
+  - Compatible with most PDF types and layouts
+
+- **`mineru-latest`** - **Best for academic/research documents**
+  - Uses `mineru` (MinerU) for advanced academic paper parsing
+  - Superior handling of complex layouts, tables, and mathematical content
+  - Slower processing but higher accuracy for technical documents
+
+**💡 Pro Tip**: Start with `latest` (marker-pdf) for most use cases. Switch to `mineru-latest` if you work with academic papers, research documents, or complex technical PDFs with tables and formulas.
+
 ### Prerequisites
 - **Container Runtime**: Docker or Podman installed
 - **DeepInfra API Key**: [Get your free key](https://deepinfra.com) (recommended for cost-effectiveness)
