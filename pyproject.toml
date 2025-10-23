@@ -180,10 +180,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/juanqui/pdfkb-mcp"
-Documentation = "https://github.com/juanqui/pdfkb-mcp#readme"
-Repository = "https://github.com/juanqui/pdfkb-mcp"
-Issues = "https://github.com/juanqui/pdfkb-mcp/issues"
+Homepage = "https://github.com/tekgnosis-net/pdfkb-mcp"
+Documentation = "https://github.com/tekgnosis-net/pdfkb-mcp#readme"
+Repository = "https://github.com/tekgnosis-net/pdfkb-mcp"
+Issues = "https://github.com/tekgnosis-net/pdfkb-mcp/issues"
 
 [project.scripts]
 pdfkb-mcp = "pdfkb.main:main"
