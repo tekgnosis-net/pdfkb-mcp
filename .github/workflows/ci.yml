@@ -129,7 +129,7 @@ jobs:
         labels: |
           org.opencontainers.image.title=pdfkb-mcp
           org.opencontainers.image.description=PDF Knowledgebase MCP Server - Document search with vector embeddings
-          org.opencontainers.image.source=https://github.com/juanqui/pdfkb-mcp
+          org.opencontainers.image.source=https://github.com/tekgnosis-net/pdfkb-mcp
           org.opencontainers.image.licenses=MIT
           org.opencontainers.image.authors=Juan Villa <juanqui@villafam.com>
 
