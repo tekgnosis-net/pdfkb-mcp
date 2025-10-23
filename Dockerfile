@@ -60,7 +60,7 @@ RUN uv pip install --system --no-cache \
 # Needed as optionals are not working in the docker image
 
 RUN uv pip install --system --no-cache -e . \
-    && uv pip install --system --no-cache -e ".[all]" \
+    && uv pip install --system --no-cache -e ".[all-with-mineru]" \
     && pip uninstall -y pip setuptools wheel uv  # Remove build tools to save space
 
 # ============================================================================
