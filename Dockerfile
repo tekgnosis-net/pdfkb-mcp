@@ -221,7 +221,7 @@ WORKDIR ${PDFKB_APP_DIR}
 # copying whole site-packages (which can lead to mismatched binary wheels).
 COPY --from=builder /build/dist /build/dist
 RUN if ls /build/dist/*.whl >/dev/null 2>&1; then \
-        pip install --no-cache-dir /build/dist/*.whl; \
+        pip install --no-cache-dir /build/dist/*.whl && rm -rf /build/dist; \
     else \
         echo "No wheel found in /build/dist, falling back to editable install"; \
         pip install --no-cache-dir -e .; \
@@ -254,16 +254,7 @@ RUN if [ "$PDF_PARSER" = "marker" ] || [ "$PDF_PARSER" = "all" ]; then \
 # Ensure system GL libraries are present for opencv at runtime. Some base images
 # may not include these by default; install them explicitly here so cv2 can load
 # libGL.so.1 during import.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 \
-    libgl1-mesa-glx \
-    libglvnd0 \
-    libglx0 \
-    libglx-mesa0 \
-    libglapi-mesa \
-    libxcb-glx0 \
-    libxxf86vm1 \
-    && rm -rf /var/lib/apt/lists/*
+# (GL and related libraries are already installed in the runtime apt-get above.)
 
 # Set ownership of static directory if it exists (for marker parser)
 # Make this tolerant: try to chown, but don't fail the build if some files
