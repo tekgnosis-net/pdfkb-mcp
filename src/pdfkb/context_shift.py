@@ -62,10 +62,22 @@ class ContextShiftManager:
         # Threshold (number of documents) above which we trigger scoping.
         # Use config.large_corpus_threshold if present, otherwise default 1000.
         def _safe_int(val: Any, default: int) -> int:
+            """Safely convert a config value to int.
+
+            Avoid converting MagicMock or other complex test doubles which
+            may implement __int__ and return misleading values (MagicMock -> 1).
+            Only attempt conversion for plain ints or strings containing digits.
+            """
             try:
-                return int(val)
+                # Keep simple and deterministic: accept ints directly.
+                if isinstance(val, int):
+                    return val
+                # Accept strings that represent integers.
+                if isinstance(val, str):
+                    return int(val)
             except Exception:
-                return default
+                pass
+            return default
 
         # When tests pass a MagicMock for `config`, getattr will return another
         # MagicMock which is not int()-able. Use a safe cast to fall back to
