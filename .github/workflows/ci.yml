@@ -18,7 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # Keep CI testing restricted to Python 3.11 (used by the Docker image).
+        # Previously we tested multiple Python versions; to speed up CI and
+        # match the container runtime we only run 3.11 here. If you need to
+        # re-enable other versions temporarily, uncomment the line below.
+        # python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11"]
     outputs:
       is-release: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
