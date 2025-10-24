@@ -57,12 +57,8 @@ def _ensure_unstructured_partition_stubs():
         def partition_text(text=None, **kwargs):
             return ["__stub_text_element_1__", "__stub_text_element_2__"]
 
-        text_mod.partition_text = partition_text
-        sys.modules["unstructured.partition.text"] = text_mod
-
-
-
-
+    text_mod.partition_text = partition_text
+    sys.modules["unstructured.partition.text"] = text_mod
 
 def _ensure_optional_dependency_stubs():
     """Install lightweight stubs for other optional packages that tests
