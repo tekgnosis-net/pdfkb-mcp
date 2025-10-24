@@ -23,8 +23,11 @@ jobs:
       - name: Install project and dev dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          # Install the package and developer extras (falls back to editable install)
-          python -m pip install -e '.[dev]' || python -m pip install -e .
+          # Install the package and developer extras. Some test suites
+          # exercise optional parsers (Unstructured, Docling) so try to
+          # install those extras as well; fall back gracefully to dev
+          # extras if the full install is not possible in the runner.
+          python -m pip install -e ".[dev,unstructured_chunker,docling]" || python -m pip install -e '.[dev]' || python -m pip install -e .
 
       - name: Run tests
         run: |
