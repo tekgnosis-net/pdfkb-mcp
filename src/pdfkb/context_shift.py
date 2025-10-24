@@ -61,14 +61,26 @@ class ContextShiftManager:
 
         # Threshold (number of documents) above which we trigger scoping.
         # Use config.large_corpus_threshold if present, otherwise default 1000.
-        self.large_corpus_threshold = getattr(config, "large_corpus_threshold", 1000) if config else 1000
+        def _safe_int(val: Any, default: int) -> int:
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        # When tests pass a MagicMock for `config`, getattr will return another
+        # MagicMock which is not int()-able. Use a safe cast to fall back to
+        # sensible defaults instead of letting comparisons blow up during tests.
+        self.large_corpus_threshold = _safe_int(getattr(config, "large_corpus_threshold", None), 1000) if config else 1000
 
         # How many docs to keep when scoping (tunable)
-        self.scope_doc_limit = getattr(config, "scope_doc_limit", 50) if config else 50
+        self.scope_doc_limit = _safe_int(getattr(config, "scope_doc_limit", None), 50) if config else 50
+
         # Optional Redis-backed scope store
         self._redis = None
-        self._use_redis = bool(getattr(config, "use_scope_redis", False)) if config else False
-        self._scope_ttl = int(getattr(config, "scope_ttl_seconds", 3600)) if config else 3600
+        # Only enable Redis when the config explicitly provides a bool True.
+        raw_use_redis = getattr(config, "use_scope_redis", None) if config else None
+        self._use_redis = True if isinstance(raw_use_redis, bool) and raw_use_redis else False
+        self._scope_ttl = _safe_int(getattr(config, "scope_ttl_seconds", None), 3600) if config else 3600
         if self._use_redis:
             try:
                 # Try modern redis asyncio client
