@@ -145,6 +145,14 @@ class ServerConfig:
     summarizer_model_cache_dir: str = "~/.cache/pdfkb-mcp/summarizer"  # Cache directory
     summarizer_api_base: str = ""  # Custom API base URL for remote summarizer
     summarizer_api_key: str = ""  # API key for remote summarizer (fallback to openai_api_key)
+    # Context-shifting configuration
+    enable_context_shifting: bool = True  # Enable ContextShiftManager scoping
+    large_corpus_threshold: int = 1000  # Documents count threshold to trigger scoping
+    scope_doc_limit: int = 50  # How many documents to keep when scoping
+    # Optional Redis-backed session scope persistence (disabled by default)
+    use_scope_redis: bool = False
+    scope_redis_url: str = "redis://localhost:6379/0"
+    scope_ttl_seconds: int = 3600  # TTL for stored scopes in seconds
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -946,6 +954,34 @@ class ServerConfig:
 
         if summarizer_api_key := os.getenv("PDFKB_SUMMARIZER_API_KEY"):
             config_kwargs["summarizer_api_key"] = summarizer_api_key
+
+        # Context-shifting configuration from environment
+        if enable_context_shifting := os.getenv("PDFKB_ENABLE_CONTEXT_SHIFTING"):
+            config_kwargs["enable_context_shifting"] = enable_context_shifting.lower() in ("true", "1", "yes", "on")
+
+        if large_corpus_threshold := os.getenv("PDFKB_LARGE_CORPUS_THRESHOLD"):
+            try:
+                config_kwargs["large_corpus_threshold"] = int(large_corpus_threshold)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_LARGE_CORPUS_THRESHOLD: {large_corpus_threshold}")
+
+        if scope_doc_limit := os.getenv("PDFKB_SCOPE_DOC_LIMIT"):
+            try:
+                config_kwargs["scope_doc_limit"] = int(scope_doc_limit)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SCOPE_DOC_LIMIT: {scope_doc_limit}")
+
+        if use_scope_redis := os.getenv("PDFKB_USE_SCOPE_REDIS"):
+            config_kwargs["use_scope_redis"] = use_scope_redis.lower() in ("true", "1", "yes", "on")
+
+        if scope_redis_url := os.getenv("PDFKB_SCOPE_REDIS_URL"):
+            config_kwargs["scope_redis_url"] = scope_redis_url
+
+        if scope_ttl := os.getenv("PDFKB_SCOPE_TTL_SECONDS"):
+            try:
+                config_kwargs["scope_ttl_seconds"] = int(scope_ttl)
+            except ValueError:
+                raise ConfigurationError(f"Invalid PDFKB_SCOPE_TTL_SECONDS: {scope_ttl}")
 
         # Parse transport configuration
         transport = os.getenv("PDFKB_TRANSPORT")

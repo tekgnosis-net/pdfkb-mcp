@@ -194,6 +194,8 @@ RUN if [ "$USE_CUDA" = "true" ]; then \
     fi
 # Ensure opencv headless is available at runtime (some wheel layouts miss cv2 when copied)
 RUN pip install --no-cache-dir opencv-python-headless==4.11.0.86 || true
+# Ensure redis client is available in runtime for optional Redis-backed scopes
+RUN pip install --no-cache-dir redis>=4.6.0 || true
 
 # Create non-root user for security
 RUN groupadd -r -g 1001 pdfkb && \

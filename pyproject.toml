@@ -74,6 +74,8 @@ dependencies = [
 
     # HTTP client for DeepInfra API
     "aiohttp>=3.9.0",
+    # Optional Redis client for session scope persistence (used by ContextShiftManager)
+    "redis>=4.6.0",
 ]
 
 [project.optional-dependencies]

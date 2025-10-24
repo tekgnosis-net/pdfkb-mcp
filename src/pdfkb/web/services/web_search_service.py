@@ -7,6 +7,7 @@ from typing import Any, Dict
 from ...embeddings import EmbeddingService
 from ...models import SearchQuery
 from ...vector_store import VectorStore
+from ...context_shift import ContextShiftManager
 from ..models.web_models import SearchRequest, SearchResponse, SearchResultItem, SearchSuggestionsResponse
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,12 @@ class WebSearchService:
         self.vector_store = vector_store
         self.embedding_service = embedding_service
         self.document_cache = document_cache
+        # create a ContextShiftManager for web searches (use vector_store.config if available)
+        try:
+            cfg = getattr(self.vector_store, "config", None)
+            self.context_manager = ContextShiftManager(self.vector_store, self.embedding_service, self.vector_store.text_index, cfg)
+        except Exception:
+            self.context_manager = None
 
     async def search(self, search_request: SearchRequest) -> SearchResponse:
         """Perform vector similarity search.
@@ -59,8 +66,13 @@ class WebSearchService:
             if not query_embedding:
                 raise ValueError("Failed to generate query embedding")
 
-            # Perform search
-            search_results = await self.vector_store.search(search_query, query_embedding)
+            # Perform search (use ContextShiftManager when available)
+            if getattr(self, "context_manager", None):
+                # Attempt to use a session identifier if SearchRequest carries one
+                session_id = getattr(search_request, "session_id", None)
+                search_results = await self.context_manager.scoped_search(search_request.query, session_id=session_id, limit=search_request.limit)
+            else:
+                search_results = await self.vector_store.search(search_query, query_embedding)
 
             # Convert to web response format
             result_items = []

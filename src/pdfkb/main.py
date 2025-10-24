@@ -24,6 +24,7 @@ from .file_monitor import FileMonitor
 from .intelligent_cache import IntelligentCacheManager
 from .models import Document, SearchQuery
 from .vector_store import VectorStore
+from .context_shift import ContextShiftManager
 
 if TYPE_CHECKING:
     from .background_queue import BackgroundProcessingQueue
@@ -114,6 +115,18 @@ class PDFKnowledgebaseServer:
             self.vector_store.set_embedding_service(self.embedding_service)
             self.vector_store.set_reranker_service(self.reranker_service)
             await self.vector_store.initialize()
+
+            # Initialize context shift manager (minimal, optional)
+            try:
+                if getattr(self.config, "enable_context_shifting", False):
+                    self.context_manager = ContextShiftManager(
+                        self.vector_store, self.embedding_service, self.vector_store.text_index, self.config
+                    )
+                else:
+                    self.context_manager = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize ContextShiftManager: {e}")
+                self.context_manager = None
 
             self.document_processor = DocumentProcessor(
                 self.config,
@@ -716,8 +729,15 @@ class PDFKnowledgebaseServer:
                 if not query_embedding:
                     raise EmbeddingError("Failed to generate query embedding")
 
-                # Search vector store
-                search_results = await self.vector_store.search(search_query, query_embedding)
+                # Search vector store (use ContextShiftManager when available)
+                if getattr(self, "context_manager", None):
+                    # Use a short session id for MCP tools; allows reuse within session
+                    session_id = "mcp"
+                    search_results = await self.context_manager.scoped_search(
+                        search_query.query, session_id=session_id, limit=search_query.limit
+                    )
+                else:
+                    search_results = await self.vector_store.search(search_query, query_embedding)
 
                 # Format results
                 results_data = []
@@ -749,6 +769,67 @@ class PDFKnowledgebaseServer:
                 return {"success": False, "error": str(e)}
             except Exception as e:
                 logger.error(f"Unexpected error in search: {e}")
+                return {"success": False, "error": f"Unexpected error: {e}"}
+
+        @self.app.tool()
+        async def scoped_search_demo(
+            query: str,
+            limit: int = 5,
+            session_id: Optional[str] = None,
+            summarize: bool = False,
+            summary_run: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            """Demo scoped search tool that uses ContextShiftManager and optional summarization.
+
+            This tool demonstrates how to call the context-shifting layer and optionally request a
+            short document summary for the top result. It's intended as a minimal, non-invasive demo.
+            """
+            try:
+                if not query or not query.strip():
+                    raise ValidationError("Query cannot be empty", "query")
+
+                if limit <= 0:
+                    raise ValidationError("Limit must be positive", "limit")
+
+                logger.info(f"Scoped search demo: {query} (limit={limit})")
+
+                # Use ContextShiftManager when available
+                if getattr(self, "context_manager", None):
+                    results = await self.context_manager.scoped_search(query, session_id=session_id, limit=limit)
+                else:
+                    # Fallback to existing embedding + vector search path
+                    query_embedding = await self.embedding_service.generate_embedding(query)
+                    search_query = SearchQuery(query=query, limit=limit, metadata_filter=None, min_score=0.0)
+                    results = await self.vector_store.search(search_query, query_embedding)
+
+                # Convert results
+                results_data = [r.to_dict() for r in results]
+
+                response = {"success": True, "results": results_data, "total_results": len(results_data)}
+
+                # Optionally summarize the top result's document
+                if summarize and results and self.summarizer_service:
+                    try:
+                        top_doc_id = results[0].document.id
+                        # fetch full document content (may be large)
+                        content = await self.vector_store.get_document_content(top_doc_id)
+                        if content:
+                            summary = await self.summarizer_service.summarize_document(content, filename=results[0].document.filename)
+                            response["summary"] = {
+                                "title": summary.title,
+                                "short_description": summary.short_description,
+                                "long_description": summary.long_description,
+                            }
+                    except Exception as e:
+                        logger.warning(f"Failed to summarize top result: {e}")
+
+                return response
+
+            except ValidationError as e:
+                logger.error(f"Validation error in scoped_search_demo: {e}")
+                return {"success": False, "error": str(e)}
+            except Exception as e:
+                logger.error(f"Error in scoped_search_demo: {e}")
                 return {"success": False, "error": f"Unexpected error: {e}"}
 
         @self.app.tool()
