@@ -2,7 +2,9 @@
 
 import shutil
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch, MagicMock
+import types
+import sys
 
 import pytest
 
@@ -53,22 +55,32 @@ class TestPDFParser:
         assert parser.config == {}
 
     @pytest.mark.asyncio
-    async def test_unstructured_parser_parse(self, sample_pdf):
+    async def test_unstructured_parser_parse(self, sample_pdf, monkeypatch):
         """Test UnstructuredPDFParser parse method."""
         pdf_file = sample_pdf
+        # Prepare lightweight stubs for unstructured.partition.pdf so the
+        # parser can import and call partition_pdf without pulling heavy
+        # optional dependencies into the test environment.
+        un_pkg = types.ModuleType("unstructured")
+        un_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "unstructured", un_pkg)
 
-        # Mock the unstructured partition function at the correct location
-        with patch("unstructured.partition.pdf.partition_pdf") as mock_partition:
-            mock_partition.return_value = ["test element 1", "test element 2"]
+        part_pkg = types.ModuleType("unstructured.partition")
+        part_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "unstructured.partition", part_pkg)
 
-            parser = UnstructuredPDFParser(strategy="fast")
-            result = await parser.parse(pdf_file)
+        pdf_mod = types.ModuleType("unstructured.partition.pdf")
+        pdf_mod.partition_pdf = MagicMock(return_value=["test element 1", "test element 2"])
+        monkeypatch.setitem(sys.modules, "unstructured.partition.pdf", pdf_mod)
 
-            assert isinstance(result, ParseResult)
-            assert len(result.pages) > 0
-            assert len(result.pages[0].markdown_content) > 0
-            assert "processor_version" in result.metadata
-            assert result.metadata["processor_version"] == "unstructured"
+        parser = UnstructuredPDFParser(strategy="fast")
+        result = await parser.parse(pdf_file)
+
+        assert isinstance(result, ParseResult)
+        assert len(result.pages) > 0
+        assert len(result.pages[0].markdown_content) > 0
+        assert "processor_version" in result.metadata
+        assert result.metadata["processor_version"] == "unstructured"
 
     @pytest.mark.asyncio
     async def test_pymupdf4llm_parser_parse(self, sample_pdf):
@@ -110,17 +122,26 @@ class TestPDFParser:
         assert "processor_version" in result.metadata
 
     @pytest.mark.asyncio
-    async def test_pdf_processor_with_unstructured_parser(self, config, embedding_service, sample_pdf):
+    async def test_pdf_processor_with_unstructured_parser(self, config, embedding_service, sample_pdf, monkeypatch):
         """Test PDFProcessor with Unstructured parser."""
         # Create a config with unstructured parser
         config.pdf_parser = "unstructured"
+        # Inject stub modules so the processor can instantiate the
+        # Unstructured parser without installing heavy optional deps.
+        un_pkg = types.ModuleType("unstructured")
+        un_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "unstructured", un_pkg)
 
-        # Mock the unstructured partition function
-        with patch("unstructured.partition.pdf.partition_pdf") as mock_partition:
-            mock_partition.return_value = ["test element 1", "test element 2"]
+        part_pkg = types.ModuleType("unstructured.partition")
+        part_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "unstructured.partition", part_pkg)
 
-            processor = PDFProcessor(config, embedding_service)
-            assert isinstance(processor.parser, UnstructuredPDFParser)
+        pdf_mod = types.ModuleType("unstructured.partition.pdf")
+        pdf_mod.partition_pdf = MagicMock(return_value=["test element 1", "test element 2"])
+        monkeypatch.setitem(sys.modules, "unstructured.partition.pdf", pdf_mod)
+
+        processor = PDFProcessor(config, embedding_service)
+        assert isinstance(processor.parser, UnstructuredPDFParser)
 
     @pytest.mark.asyncio
     async def test_pdf_processor_with_pymupdf4llm_parser(self, config, embedding_service, sample_pdf):
@@ -133,7 +154,7 @@ class TestPDFParser:
         assert isinstance(processor.parser, PyMuPDF4LLMParser)
 
     @pytest.mark.asyncio
-    async def test_pdf_processor_parser_fallback(self, config, embedding_service, sample_pdf):
+    async def test_pdf_processor_parser_fallback(self, config, embedding_service, sample_pdf, monkeypatch):
         """Test PDFProcessor parser fallback when primary parser is not available."""
         # Create a config with pymupdf4llm parser
         config.pdf_parser = "pymupdf4llm"
@@ -142,13 +163,23 @@ class TestPDFParser:
         with patch("pdfkb.parsers.parser_pymupdf4llm.PyMuPDF4LLMParser.__init__") as mock_pymupdf_init:
             mock_pymupdf_init.side_effect = ImportError("pymupdf4llm not available")
 
-            # Mock the unstructured partition function
-            with patch("unstructured.partition.pdf.partition_pdf") as mock_partition:
-                mock_partition.return_value = ["test element 1", "test element 2"]
+            # Inject stubs for unstructured.partition.pdf so fallback can be
+            # exercised without installing heavy deps.
+            un_pkg = types.ModuleType("unstructured")
+            un_pkg.__path__ = []
+            monkeypatch.setitem(sys.modules, "unstructured", un_pkg)
 
-                processor = PDFProcessor(config, embedding_service)
-                # Should fall back to Unstructured parser
-                assert isinstance(processor.parser, UnstructuredPDFParser)
+            part_pkg = types.ModuleType("unstructured.partition")
+            part_pkg.__path__ = []
+            monkeypatch.setitem(sys.modules, "unstructured.partition", part_pkg)
+
+            pdf_mod = types.ModuleType("unstructured.partition.pdf")
+            pdf_mod.partition_pdf = MagicMock(return_value=["test element 1", "test element 2"])
+            monkeypatch.setitem(sys.modules, "unstructured.partition.pdf", pdf_mod)
+
+            processor = PDFProcessor(config, embedding_service)
+            # Should fall back to Unstructured parser
+            assert isinstance(processor.parser, UnstructuredPDFParser)
 
     @pytest.mark.asyncio
     async def test_pdf_processor_both_parsers_unavailable(self, config, embedding_service):
