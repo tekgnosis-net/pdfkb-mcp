@@ -38,8 +38,9 @@ class ParseResult:
 
         combined_parts = []
         for page in self.pages:
-            # Add page header
-            combined_parts.append(f"# Page {page.page_number}\n")
+            # Combine page markdown without adding artificial page headers.
+            # Tests and older code expect a flattened markdown string where
+            # page content is concatenated.
             combined_parts.append(page.markdown_content)
 
         return "\n\n".join(combined_parts)

@@ -10,6 +10,7 @@ The stub only gets installed when the real import fails, so it won't
 interfere when `unstructured` is present.
 """
 
+import os
 import sys
 import types
 
@@ -286,7 +287,26 @@ def _ensure_optional_dependency_stubs():
         importlib.import_module("reportlab")
     except Exception:
         rep = types.ModuleType("reportlab")
+        # provide pdfgen.canvas submodule used in tests
+        pdfgen = types.ModuleType("reportlab.pdfgen")
+
+        class DummyCanvas:
+            def __init__(self, *a, **k):
+                pass
+
+            def save(self):
+                return None
+
+            def drawString(self, x, y, text):
+                # minimal implementation used by tests that render simple PDFs
+                return None
+
+        canvas_mod = types.ModuleType("reportlab.pdfgen.canvas")
+        canvas_mod.Canvas = DummyCanvas
+
         sys.modules["reportlab"] = rep
+        sys.modules["reportlab.pdfgen"] = pdfgen
+        sys.modules["reportlab.pdfgen.canvas"] = canvas_mod
 
     # docling: some integration tests patch objects inside docling; provide
     # minimal stub modules so those patch targets can be resolved when the
@@ -296,6 +316,8 @@ def _ensure_optional_dependency_stubs():
     except Exception:
         doc = types.ModuleType("docling")
         doc.__path__ = []
+        # Mark this as a test stub so integration checks can detect it's not a real install
+        setattr(doc, "__pdfkb_stub__", True)
         sys.modules["docling"] = doc
 
         # Submodules used in tests
@@ -320,9 +342,150 @@ def _ensure_optional_dependency_stubs():
         except Exception:
             pass
 
+        # Provide other minimal attributes used by tests/patch targets
+        try:
+            # DocumentConverter is patched in several tests
+            # Provide a minimal DocumentConverter with a `convert` method that
+            # returns an object similar to docling's ConversionResult so parser
+            # code can call `conversion_result.document.export_to_markdown()`.
+            class DummyConversionDocument:
+                def __init__(self):
+                    self.pages = []
+
+                def export_to_markdown(self):
+                    return "# Docling Stub\n\nConverted"
+
+            class DummyConversionResult:
+                def __init__(self):
+                    self.status = getattr(self, "status", None)
+                    self.document = DummyConversionDocument()
+
+            class DummyDocumentConverter:
+                def __init__(self, *a, **k):
+                    pass
+
+                def convert(self, path):
+                    # Return a simple ConversionResult-like object
+                    return DummyConversionResult()
+
+            sys.modules["docling.document_converter"].DocumentConverter = DummyDocumentConverter
+        except Exception:
+            pass
+
+        try:
+            # PdfFormatOption referenced in some code paths
+            sys.modules["docling.document_converter"].PdfFormatOption = object
+        except Exception:
+            pass
+
+        try:
+            # InputFormat used by parser code
+            if "docling.datamodel.base_models" not in sys.modules:
+                sys.modules["docling.datamodel.base_models"] = types.ModuleType("docling.datamodel.base_models")
+            # Provide a simple enum-like InputFormat with PDF attribute so
+            # parser code that references InputFormat.PDF works with the stub.
+            class DummyInputFormat:
+                PDF = "pdf"
+
+            sys.modules["docling.datamodel.base_models"].InputFormat = DummyInputFormat
+        except Exception:
+            pass
+
+        try:
+            # Some versions expose OCR option classes - provide placeholder
+            sys.modules["docling.datamodel.pipeline_options"].TesseractOcrOptions = object
+        except Exception:
+            pass
+
+    # langchain_text_splitters: provide light-weight local fallback used by
+    # LangChainChunker when langchain_text_splitters isn't installed.
+    try:
+        importlib.import_module("langchain_text_splitters")
+    except Exception:
+        lts = types.ModuleType("langchain_text_splitters")
+
+        class MarkdownHeaderTextSplitter:
+            def __init__(self, headers_to_split_on=None):
+                self.headers = headers_to_split_on or [("#", "Header 1")]
+
+            def split_text(self, text: str):
+                # Very small heuristic: split on top-level headers
+                import re
+
+                pattern = r"(?m)^(# .*)$"
+                parts = []
+                if not text:
+                    return []
+                # If headers present, split preserving header lines
+                headers = re.split(pattern, text)
+                # Rejoin pairs (header, body)
+                i = 0
+                if len(headers) == 1:
+                    return [text]
+                while i < len(headers):
+                    if i + 1 < len(headers):
+                        hdr = headers[i].strip()
+                        body = headers[i + 1].strip()
+                        combined = f"{hdr}\n\n{body}" if hdr else body
+                        parts.append(combined)
+                        i += 2
+                    else:
+                        parts.append(headers[i].strip())
+                        i += 1
+                return parts
+
+        class RecursiveCharacterTextSplitter:
+            def __init__(self, chunk_size=1000, chunk_overlap=200, separators=None):
+                self.chunk_size = chunk_size
+                self.chunk_overlap = chunk_overlap
+
+            def split_text(self, text: str):
+                if not text:
+                    return []
+                chunks = []
+                i = 0
+                while i < len(text):
+                    chunk = text[i : i + self.chunk_size]
+                    chunks.append(chunk)
+                    i += self.chunk_size - self.chunk_overlap
+                return chunks
+
+        lts.MarkdownHeaderTextSplitter = MarkdownHeaderTextSplitter
+        lts.RecursiveCharacterTextSplitter = RecursiveCharacterTextSplitter
+        sys.modules["langchain_text_splitters"] = lts
+
+    # aiohttp: provide a minimal ClientSession implementation used by tests that patch
+    # higher-level behaviors rather than exercising network.
+    try:
+        importlib.import_module("aiohttp")
+    except Exception:
+        aio = types.ModuleType("aiohttp")
+
+        class DummyClientSession:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, *a, **k):
+                return types.SimpleNamespace(status=200, text=lambda: "{}")
+
+            async def get(self, *a, **k):
+                return types.SimpleNamespace(status=200, text=lambda: "{}")
+
+        sys.modules["aiohttp"].ClientSession = DummyClientSession
+
 
 def pytest_configure(config):
     # Ensure stubs early during test collection so patch(...) in tests can find
     # the target module path.
     _ensure_unstructured_partition_stubs()
     _ensure_optional_dependency_stubs()
+    # Force CPU for embedding tests in CI/dev environments to avoid CUDA OOMs
+    # when tests are run on machines with busy GPUs. Tests that need GPU can
+    # override this explicitly.
+    os.environ.setdefault("PDFKB_EMBEDDING_DEVICE", "cpu")

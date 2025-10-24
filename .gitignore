@@ -275,6 +275,12 @@ logs/
 docs/proposals/
 docs/specs/
 
+# Local agent state (chat history and todos) - ignored to avoid committing private logs
+.local_state/
+
+# Local virtualenv for CI/test runs
+.venv_ci/
+
 # OS-specific
 .Trash-*
 $RECYCLE.BIN/

@@ -520,6 +520,11 @@ def _is_docling_available():
     try:
         import docling  # noqa: F401 # pylint:disable=unused-import
 
+        # If conftest installed a lightweight stub for collection-time patching,
+        # treat that as not-actually-installed so integration tests are skipped.
+        if getattr(docling, "__pdfkb_stub__", False):
+            return False
+
         return True
     except ImportError:
         return False

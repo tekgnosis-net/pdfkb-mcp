@@ -1,0 +1,49 @@
+name: Integration Smoke Test
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  smoke:
+    name: Smoke test (container health)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        run: |
+          docker pull ghcr.io/tekgnosis-net/pdfkb-mcp:all || true
+
+      - name: Start container (CPU embeddings)
+        run: |
+          docker run -d --name pdfkb-smoke -p 9000:8000 \
+            -e PDFKB_EMBEDDING_DEVICE=cpu \
+            ghcr.io/tekgnosis-net/pdfkb-mcp:all
+
+      - name: Wait for /health (up to 2 minutes)
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9000/health || echo "")
+            echo "Attempt $i: status=$status"
+            if [ "$status" = "200" ]; then
+              echo "health ok"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Service did not become healthy in time"
+          docker logs pdfkb-smoke || true
+          exit 1
+
+      - name: Run a basic API smoke (status)
+        run: |
+          curl -sS http://localhost:9000/api/status || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f pdfkb-smoke || true

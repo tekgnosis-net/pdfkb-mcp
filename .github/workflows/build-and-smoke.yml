@@ -1,0 +1,82 @@
+name: Build and Smoke Test
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: |
+          docker build --pull -t pdfkb-pr-smoke .
+
+      - name: Save built image as tar (for debugging)
+        run: |
+          docker save pdfkb-pr-smoke -o pdfkb-pr-smoke-image.tar
+
+      - name: Upload built image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfkb-pr-smoke-image
+          path: pdfkb-pr-smoke-image.tar
+
+      - name: Start container (CPU embeddings)
+        run: |
+          docker run -d --name pdfkb-pr-smoke -p 9000:8000 \
+            -e PDFKB_EMBEDDING_DEVICE=cpu \
+            pdfkb-pr-smoke
+
+      - name: Wait for /health (up to ~5 minutes with backoff)
+        run: |
+          set -euo pipefail
+          max_attempts=120
+          attempt=1
+          sleep_seconds=1
+          while [ $attempt -le $max_attempts ]; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9000/health || echo "")
+            echo "Attempt $attempt: status=$status"
+            if [ "$status" = "200" ]; then
+              echo "health ok"
+              break
+            fi
+            # Exponential-ish backoff with cap
+            sleep $sleep_seconds
+            attempt=$((attempt+1))
+            if [ $sleep_seconds -lt 10 ]; then
+              sleep_seconds=$((sleep_seconds*2))
+            fi
+          done
+          if [ "$status" != "200" ]; then
+            echo "Service did not become healthy in time"
+            docker logs pdfkb-pr-smoke || true
+            exit 1
+          fi
+
+      - name: Extra wait for background processing (30s)
+        run: |
+          # Allow the app a short time to process mounted/sample docs before running a sample search
+          sleep 30
+
+      - name: Run a basic API smoke (status)
+        run: |
+          curl -sS http://localhost:9000/api/status || true
+
+      - name: Run a sample search (best-effort)
+        run: |
+          set -euo pipefail
+          # Try a search; return success even if results are empty, but capture output for debugging
+          resp=$(curl -sS -X POST http://localhost:9000/api/search -H "Content-Type: application/json" -d '{"query":"test","limit":3}' || true)
+          echo "Search response: $resp"
+
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f pdfkb-pr-smoke || true

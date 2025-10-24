@@ -23,10 +23,15 @@ class TestWebIntegration:
         """Create a temporary configuration for testing."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-
-            # Use patch.dict with clear=True to isolate from .env files
+            # Choose an available ephemeral port to avoid collisions on CI hosts
+            import socket
             from unittest.mock import patch
 
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", 0))
+                free_port = s.getsockname()[1]
+
+            # Use patch.dict with clear=True to isolate from .env files
             with (
                 patch.dict(
                     "os.environ",
@@ -35,8 +40,9 @@ class TestWebIntegration:
                         "KNOWLEDGEBASE_PATH": str(temp_path / "pdfs"),
                         "CACHE_DIR": str(temp_path / "cache"),
                         "WEB_ENABLED": "true",
-                        "WEB_PORT": "8081",  # Use different port for testing
+                        "WEB_PORT": str(free_port),
                         "WEB_HOST": "127.0.0.1",
+                        "PDFKB_EMBEDDING_DEVICE": "cpu",
                     },
                     clear=True,
                 ),
@@ -150,6 +156,7 @@ class TestWebIntegration:
                         "WEB_ENABLED": "true",
                         "WEB_PORT": "8081",
                         "WEB_HOST": "127.0.0.1",
+                        "PDFKB_EMBEDDING_DEVICE": "cpu",
                     },
                     clear=True,
                 ),
