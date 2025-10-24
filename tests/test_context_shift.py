@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -37,7 +36,7 @@ async def test_small_corpus_no_scoping_calls_vector_search():
 
     manager = ContextShiftManager(vs, embedding_service=emb, text_index=None, config=MagicMock())
     # small corpus threshold default is 1000, so no scoping expected
-    results = await manager.scoped_search("test query", session_id="s1", limit=3)
+    await manager.scoped_search("test query", session_id="s1", limit=3)
 
     # vector_store.search should have been called once
     assert vs.search.call_count == 1
@@ -64,7 +63,7 @@ async def test_large_corpus_scopes_using_text_index():
 
     manager = ContextShiftManager(vs, embedding_service=emb, text_index=ti, config=cfg)
 
-    results = await manager.scoped_search("find me something", session_id="sess1", limit=5)
+    await manager.scoped_search("find me something", session_id="sess1", limit=5)
 
     # vector_store.search should have been called once
     assert vs.search.call_count == 1

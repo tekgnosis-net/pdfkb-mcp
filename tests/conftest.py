@@ -61,10 +61,7 @@ def _ensure_unstructured_partition_stubs():
         sys.modules["unstructured.partition.text"] = text_mod
 
 
-def pytest_configure(config):
-    # Ensure stubs early during test collection so patch(...) in tests can find
-    # the target module path.
-    _ensure_unstructured_partition_stubs()
+
 
 
 def _ensure_optional_dependency_stubs():
