@@ -334,6 +334,7 @@ def _ensure_optional_dependency_stubs():
         # Provide a dummy PdfPipelineOptions class so tests that patch it
         # can resolve the target.
         try:
+
             class PdfPipelineOptions:
                 def __init__(self, *a, **k):
                     pass
@@ -382,6 +383,7 @@ def _ensure_optional_dependency_stubs():
             # InputFormat used by parser code
             if "docling.datamodel.base_models" not in sys.modules:
                 sys.modules["docling.datamodel.base_models"] = types.ModuleType("docling.datamodel.base_models")
+
             # Provide a simple enum-like InputFormat with PDF attribute so
             # parser code that references InputFormat.PDF works with the stub.
             class DummyInputFormat:

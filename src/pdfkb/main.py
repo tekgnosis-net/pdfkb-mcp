@@ -814,7 +814,9 @@ class PDFKnowledgebaseServer:
                         # fetch full document content (may be large)
                         content = await self.vector_store.get_document_content(top_doc_id)
                         if content:
-                            summary = await self.summarizer_service.summarize_document(content, filename=results[0].document.filename)
+                            summary = await self.summarizer_service.summarize_document(
+                                content, filename=results[0].document.filename
+                            )
                             response["summary"] = {
                                 "title": summary.title,
                                 "short_description": summary.short_description,

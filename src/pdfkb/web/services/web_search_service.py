@@ -35,7 +35,9 @@ class WebSearchService:
         # create a ContextShiftManager for web searches (use vector_store.config if available)
         try:
             cfg = getattr(self.vector_store, "config", None)
-            self.context_manager = ContextShiftManager(self.vector_store, self.embedding_service, self.vector_store.text_index, cfg)
+            self.context_manager = ContextShiftManager(
+                self.vector_store, self.embedding_service, self.vector_store.text_index, cfg
+            )
         except Exception:
             self.context_manager = None
 
@@ -70,7 +72,9 @@ class WebSearchService:
             if getattr(self, "context_manager", None):
                 # Attempt to use a session identifier if SearchRequest carries one
                 session_id = getattr(search_request, "session_id", None)
-                search_results = await self.context_manager.scoped_search(search_request.query, session_id=session_id, limit=search_request.limit)
+                search_results = await self.context_manager.scoped_search(
+                    search_request.query, session_id=session_id, limit=search_request.limit
+                )
             else:
                 search_results = await self.vector_store.search(search_query, query_embedding)
 
