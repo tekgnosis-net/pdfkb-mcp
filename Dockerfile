@@ -275,6 +275,15 @@ RUN if [ -d "/usr/local/lib/python3.11/site-packages/static" ]; then \
         chown -R pdfkb:pdfkb /usr/local/lib/python3.11/site-packages/static || true; \
     fi
 
+# Ensure `/opt/conda` site-packages `static` directory exists and is writable
+# by the runtime user. Some installations (conda-based runtimes) put
+# packages under `/opt/conda/...`, and Marker may try to create a
+# `/opt/conda/lib/python3.11/site-packages/static` directory at runtime.
+# Create it now and chown to the non-root `pdfkb` user so runtime writes
+# don't fail with PermissionError.
+RUN mkdir -p /opt/conda/lib/python3.11/site-packages/static && \
+    chown -R pdfkb:pdfkb /opt/conda/lib/python3.11/site-packages/static || true
+
 # Copy application source code
 COPY --chown=pdfkb:pdfkb src/ src/
 COPY --chown=pdfkb:pdfkb pyproject.toml .
