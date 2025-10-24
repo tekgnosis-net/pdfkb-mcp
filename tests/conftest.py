@@ -79,7 +79,6 @@ def _ensure_optional_dependency_stubs():
     try:
         importlib.import_module("whoosh")
     except Exception:
-        import types
 
         if "whoosh" not in sys.modules:
             whoosh = types.ModuleType("whoosh")
