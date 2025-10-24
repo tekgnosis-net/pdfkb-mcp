@@ -193,9 +193,7 @@ class MarkerPDFParser(DocumentParser):
             # We still raise the friendly ImportError for callers but chain
             # the original exception to preserve context.
             logger.exception("Marker import failed during parser initialization")
-            raise ImportError(
-                "Marker library not available. Install with: pip install pdfkb-mcp[marker]"
-            ) from e
+            raise ImportError("Marker library not available. Install with: pip install pdfkb-mcp[marker]") from e
         except Exception as e:
             raise RuntimeError(f"Failed to parse PDF with Marker: {e}") from e
 
