@@ -13,8 +13,11 @@ if [ -z "$REPO" ]; then
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     origin_url=$(git config --get remote.origin.url || true)
     if [ -n "$origin_url" ]; then
-      # support git@github.com:owner/repo.git and https://github.com/owner/repo.git
-      REPO=$(echo "$origin_url" | sed -E 's#(git@|https?://)([^/:]+)[:/]([^/]+)/(.+)(\.git)?#\3/\4#')
+      # Extract owner/repo from common remote URL forms and strip optional .git
+      if [[ "$origin_url" =~ github.com[:/](.+) ]]; then
+        REPO="${BASH_REMATCH[1]}"
+        REPO="${REPO%.git}"
+      fi
     fi
   fi
 fi
@@ -25,19 +28,22 @@ if [ -z "$REPO" ]; then
   exit 2
 fi
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "gh CLI is required. Install from https://cli.github.com/" >&2
-  exit 2
-fi
+for cmd in gh jq; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "$cmd is required. Please install it before running this script." >&2
+    exit 2
+  fi
+done
 
 echo "Monitoring GitHub Actions runs for repo: $REPO branch: $BRANCH (timeout: ${TIMEOUT}s)"
 
 END=$((SECONDS + TIMEOUT))
-LAST_ID=""
+LAST_RUN=""
 
 while true; do
-  # Get the latest run for the branch
-  run_json=$(gh run list --repo "$REPO" --branch "$BRANCH" --limit 1 --json id,status,conclusion,htmlUrl,workflowName,createdAt --jq '.[0]') || true
+  # Request fields supported by modern gh versions (databaseId and number)
+  run_json=$(gh run list --repo "$REPO" --branch "$BRANCH" --limit 1 --json databaseId,number,status,conclusion,url,workflowName,createdAt 2>/dev/null || true)
+
   if [ -z "$run_json" ] || [ "$run_json" = "null" ]; then
     echo "No workflow runs found on branch '$BRANCH' yet. Waiting..."
     if [ $SECONDS -ge $END ]; then
@@ -48,26 +54,45 @@ while true; do
     continue
   fi
 
-  # Extract fields safely
-  id=$(echo "$run_json" | sed -n 's/.*"id": *\([0-9]*\).*/\1/p' || echo "")
-  status=$(echo "$run_json" | sed -n 's/.*"status": *"\([^"]*\)".*/\1/p' || echo "")
-  conclusion=$(echo "$run_json" | sed -n 's/.*"conclusion": *\("[^"]*"\|null\).*/\1/p' || echo "")
-  url=$(echo "$run_json" | sed -n 's/.*"htmlUrl": *"\([^"]*\)".*/\1/p' || echo "")
-  wf=$(echo "$run_json" | sed -n 's/.*"workflowName": *"\([^"]*\)".*/\1/p' || echo "")
-  created=$(echo "$run_json" | sed -n 's/.*"createdAt": *"\([^"]*\)".*/\1/p' || echo "")
-
-  printf "Latest run: id=%s workflow=%s status=%s conclusion=%s url=%s created=%s\n" "$id" "$wf" "$status" "$conclusion" "$url" "$created"
-
-  if [ "$status" != "in_progress" ] && [ "$status" != "queued" ]; then
-    echo "Run finished: status=$status conclusion=$conclusion"
-    echo "Fetching logs for run $id (may be large)..."
-    gh run view "$id" --repo "$REPO" --log || true
-    exit 0
+  # Extract the first run object
+  run=$(echo "$run_json" | jq '.[0] // empty') || run=""
+  if [ -z "$run" ] || [ "$run" = "null" ]; then
+    echo "No workflow run object yet. Waiting..."
+    sleep 5
+    continue
   fi
 
-  if [ "$id" != "$LAST_ID" ]; then
-    echo "Observing run $id (workflow: $wf). Waiting for completion..."
-    LAST_ID=$id
+  dbid=$(echo "$run" | jq -r '.databaseId // empty')
+  num=$(echo "$run" | jq -r '.number // empty')
+  status=$(echo "$run" | jq -r '.status // empty')
+  conclusion=$(echo "$run" | jq -r '.conclusion // empty')
+  url=$(echo "$run" | jq -r '.url // empty')
+  wf=$(echo "$run" | jq -r '.workflowName // empty')
+  created=$(echo "$run" | jq -r '.createdAt // empty')
+
+  # Present a helpful summary line
+  echo "Latest run: id=${dbid:-$num} workflow=$wf status=$status conclusion=$conclusion url=$url created=$created"
+
+  # Choose an identifier for gh run view: prefer databaseId, fallback to number
+  run_id="$dbid"
+  if [ -z "$run_id" ]; then
+    run_id="$num"
+  fi
+
+  if [ -z "$run_id" ]; then
+    echo "Run has no usable id yet; waiting..."
+  else
+    if [ "$status" != "in_progress" ] && [ "$status" != "queued" ]; then
+      echo "Run finished: status=$status conclusion=$conclusion"
+      echo "Fetching logs for run $run_id (may be large)..."
+      gh run view "$run_id" --repo "$REPO" --log || echo "Failed to fetch logs for run $run_id"
+      exit 0
+    fi
+
+    if [ "$run_id" != "$LAST_RUN" ]; then
+      echo "Observing run $run_id (workflow: $wf). Waiting for completion..."
+      LAST_RUN="$run_id"
+    fi
   fi
 
   if [ $SECONDS -ge $END ]; then
