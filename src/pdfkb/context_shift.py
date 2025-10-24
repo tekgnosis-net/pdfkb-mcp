@@ -82,16 +82,10 @@ class ContextShiftManager:
         # When tests pass a MagicMock for `config`, getattr will return another
         # MagicMock which is not int()-able. Use a safe cast to fall back to
         # sensible defaults instead of letting comparisons blow up during tests.
-        self.large_corpus_threshold = (
-            _safe_int(getattr(config, "large_corpus_threshold", None), 1000)
-            if config
-            else 1000
-        )
+        self.large_corpus_threshold = _safe_int(getattr(config, "large_corpus_threshold", None), 1000) if config else 1000
 
         # How many docs to keep when scoping (tunable)
-        self.scope_doc_limit = (
-            _safe_int(getattr(config, "scope_doc_limit", None), 50) if config else 50
-        )
+        self.scope_doc_limit = _safe_int(getattr(config, "scope_doc_limit", None), 50) if config else 50
 
         # Optional Redis-backed scope store
         self._redis = None
@@ -104,9 +98,7 @@ class ContextShiftManager:
                 # Try modern redis asyncio client
                 import redis.asyncio as redis_async
 
-                self._redis = redis_async.from_url(
-                    getattr(config, "scope_redis_url", "redis://localhost:6379/0")
-                )
+                self._redis = redis_async.from_url(getattr(config, "scope_redis_url", "redis://localhost:6379/0"))
             except Exception as e:
                 logger.warning(
                     f"Redis async client not available or failed to connect; falling back to in-memory scopes: {e}"
