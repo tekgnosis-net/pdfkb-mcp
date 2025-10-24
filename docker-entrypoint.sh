@@ -169,6 +169,73 @@ setup_health_check() {
 }
 
 
+# Ensure parser extras (marker/mineru) are installed when requested via
+# the runtime environment variable `PDFKB_PDF_PARSER`.
+# This is a best-effort installer: it will try to import the required
+# package and, if missing, attempt a pip install. Failures are logged
+# but do not stop container startup.
+ensure_parser_extras_installed() {
+    parser="${PDFKB_PDF_PARSER:-pymupdf4llm}"
+    log_info "Ensuring parser extras for: ${parser} (this may install packages if missing)"
+
+    # Check if 'timeout' is available to bound pip install time
+    if command -v timeout >/dev/null 2>&1; then
+        TIMEOUT_CMD="timeout 120s"
+    else
+        TIMEOUT_CMD=""
+    fi
+
+    # Helper to attempt python import and pip install with retries if missing
+    try_install() {
+        modulename="$1"; pkg="$2"; max_retries=${3:-3};
+        attempt=1
+        while true; do
+            if python - <<PY >/dev/null 2>&1
+import sys
+try:
+    __import__("${modulename}")
+except Exception:
+    sys.exit(2)
+PY
+            then
+                log_debug "${modulename} already importable"
+                return 0
+            fi
+
+            log_warn "${modulename} not found (attempt ${attempt}/${max_retries}), attempting pip install: ${pkg}"
+
+            # Use timeout if available to avoid hangs
+            if ${TIMEOUT_CMD} pip install --no-cache-dir --upgrade "${pkg}"; then
+                log_info "Successfully installed ${pkg}"
+                return 0
+            else
+                log_warn "pip install failed for ${pkg} (attempt ${attempt})"
+            fi
+
+            attempt=$((attempt+1))
+            if [[ ${attempt} -gt ${max_retries} ]]; then
+                log_warn "Exceeded max retries (${max_retries}) installing ${pkg}; giving up"
+                return 1
+            fi
+            # backoff before retrying
+            sleep $((attempt * 2))
+        done
+    }
+
+    # Install marker extras if requested
+    if [[ "${parser}" == "marker" || "${parser}" == "all" || "${parser}" == *"marker"* ]]; then
+        try_install marker "marker-pdf>=1.10.0" 3 || log_warn "Marker may still be unavailable"
+    fi
+
+    # Install mineru extras if requested
+    if [[ "${parser}" == "mineru" || "${parser}" == "all" || "${parser}" == *"mineru"* ]]; then
+        try_install mineru "mineru[pipeline]>=2.1.10" 3 || log_warn "MinerU may still be unavailable"
+    fi
+
+    # No-op for other parsers; they are included in the base package
+}
+
+
 # Main function
 main() {
     log_info "Starting pdfkb-mcp Docker container..."
@@ -193,6 +260,11 @@ main() {
         exec "$@"
     elif [[ "${1:-}" == "pdfkb-mcp" ]]; then
         log_info "Starting pdfkb-mcp server..."
+
+        # Try to ensure parser extras are present at runtime. This is
+        # best-effort and will not prevent the server from starting if
+        # installation fails (network or permissions may block installs).
+        ensure_parser_extras_installed
 
         # Build command arguments
         cmd_args=()

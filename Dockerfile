@@ -155,11 +155,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-glx0 \
     libxxf86vm1 \
     libxext6 \
+    libxrender1 \
     libxrender-dev \
+    libx11-6 \
+    libxrandr2 \
+    libxcursor1 \
+    libxi6 \
     libgomp1 \
     libgthread-2.0-0 \
     # Aggressive cleanup to minimize image size
     && rm -rf /var/lib/apt/lists/* \
+    # Ensure dynamic linker cache is updated so libGL is discoverable
+    && ldconfig || true \
     && rm -rf /var/cache/apt/archives/* \
     && rm -rf /var/cache/apt/archives/partial/* \
     && rm -rf /var/log/apt/* \
@@ -172,6 +179,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG USE_CUDA
 ARG CUDA_PYTORCH_TAG
 ARG PDF_PARSER
+
+# Prevent interactive prompts during apt operations in the runtime image
+ENV DEBIAN_FRONTEND=noninteractive
 
 # If building with CUDA support, ensure runtime has CUDA PyTorch wheels installed
 RUN if [ "$USE_CUDA" = "true" ]; then \
