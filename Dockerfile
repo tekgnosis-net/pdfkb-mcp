@@ -104,6 +104,8 @@ RUN uv pip install --system --no-cache -e . \
     fi \
     && pip uninstall -y opencv-python || true  # Remove GUI version to avoid conflicts with headless \
     && pip install --no-cache opencv-python-headless==4.11.0.86  # Ensure headless version is properly installed
+    && pip install --no-cache-dir marker-pdf>=1.10.0 || true \
+    && pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true
 
 # Build a wheel for the application so the runtime image can install it
 # This avoids building from source in the runtime (which would require build deps).
@@ -196,6 +198,12 @@ RUN if [ "$USE_CUDA" = "true" ]; then \
 RUN pip install --no-cache-dir opencv-python-headless==4.11.0.86 || true
 # Ensure redis client is available in runtime for optional Redis-backed scopes
 RUN pip install --no-cache-dir redis>=4.6.0 || true
+
+# Extra safety: ensure marker dependencies are present at runtime for the `all` tag.
+RUN if [ "$PDF_PARSER" = "all" ] || [ "$PDF_PARSER" = "marker" ]; then \
+        pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
+        pip install --no-cache-dir opencv-python-headless==4.11.0.86 || true; \
+    fi
 
 # Create non-root user for security
 RUN groupadd -r -g 1001 pdfkb && \
