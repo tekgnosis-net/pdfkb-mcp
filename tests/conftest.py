@@ -60,6 +60,7 @@ def _ensure_unstructured_partition_stubs():
     text_mod.partition_text = partition_text
     sys.modules["unstructured.partition.text"] = text_mod
 
+
 def _ensure_optional_dependency_stubs():
     """Install lightweight stubs for other optional packages that tests
     often import at collection time. These are only installed when the
