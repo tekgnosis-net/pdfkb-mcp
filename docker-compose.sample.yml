@@ -216,11 +216,11 @@ services:
       PDFKB_SUMMARIZER_MAX_PAGES: "10"         # Max pages to use for summarization
       PDFKB_SUMMARIZER_DEVICE: ""              # Auto-detect device (local only)
       PDFKB_SUMMARIZER_MODEL_CACHE_DIR: "~/.cache/pdfkb-mcp/summarizer"
-        # Optional Redis settings for ContextShiftManager session scopes
-        # Enable Redis usage for context scopes (set to "true" to enable)
-        PDFKB_USE_SCOPE_REDIS: "${PDFKB_USE_SCOPE_REDIS:-false}"
-        # When using docker-compose, point to the internal redis service hostname
-        PDFKB_SCOPE_REDIS_URL: "${PDFKB_SCOPE_REDIS_URL:-redis://redis:6379/0}"
+      # Optional Redis settings for ContextShiftManager session scopes
+      # Enable Redis usage for context scopes (set to "true" to enable)
+      PDFKB_USE_SCOPE_REDIS: "${PDFKB_USE_SCOPE_REDIS:-false}"
+      # When using docker-compose, point to the internal redis service hostname
+      PDFKB_SCOPE_REDIS_URL: "${PDFKB_SCOPE_REDIS_URL:-redis://redis:6379/0}"
 
       # ━━━ Remote Summarizer Configuration ━━━
       # PDFKB_SUMMARIZER_PROVIDER: "remote"
@@ -330,16 +330,16 @@ services:
     networks:
       - pdfkb-network
 
-      redis:
-        image: redis:7-alpine
-        container_name: pdfkb-redis
-        restart: unless-stopped
-        ports:
-          - "6379:6379"
-        volumes:
-          - pdfkb-redis:/data
-        networks:
-          - pdfkb-network
+redis:
+  image: redis:7-alpine
+  container_name: pdfkb-redis
+  restart: unless-stopped
+  ports:
+    - "6379:6379"
+  volumes:
+    - pdfkb-redis:/data
+  networks:
+    - pdfkb-network
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 # 💾 PERSISTENT VOLUMES

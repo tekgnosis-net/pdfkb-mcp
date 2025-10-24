@@ -1,10 +1,10 @@
 """Tests for the PDF parser module."""
 
 import shutil
-from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
-import types
 import sys
+import types
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 

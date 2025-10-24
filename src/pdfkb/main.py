@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from fastmcp import FastMCP
 
 from .config import ServerConfig
+from .context_shift import ContextShiftManager
 from .document_processor import DocumentProcessor
 from .embeddings import EmbeddingService
 from .exceptions import (
@@ -24,7 +25,6 @@ from .file_monitor import FileMonitor
 from .intelligent_cache import IntelligentCacheManager
 from .models import Document, SearchQuery
 from .vector_store import VectorStore
-from .context_shift import ContextShiftManager
 
 if TYPE_CHECKING:
     from .background_queue import BackgroundProcessingQueue

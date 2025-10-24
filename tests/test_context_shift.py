@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from pdfkb.context_shift import ContextShiftManager
-from pdfkb.models import SearchQuery, SearchResult, Document, Chunk
+from pdfkb.models import Chunk, Document, SearchQuery, SearchResult
 
 
 class DummyEmbeddingService:

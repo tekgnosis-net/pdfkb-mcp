@@ -4,10 +4,10 @@ import logging
 import time
 from typing import Any, Dict
 
+from ...context_shift import ContextShiftManager
 from ...embeddings import EmbeddingService
 from ...models import SearchQuery
 from ...vector_store import VectorStore
-from ...context_shift import ContextShiftManager
 from ..models.web_models import SearchRequest, SearchResponse, SearchResultItem, SearchSuggestionsResponse
 
 logger = logging.getLogger(__name__)
