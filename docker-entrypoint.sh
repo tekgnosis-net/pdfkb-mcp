@@ -291,11 +291,22 @@ main() {
         shift
         full_cmd=(pdfkb-mcp "${cmd_args[@]}" "$@")
 
-        log_info "Executing: ${full_cmd[*]}"
+    log_info "Executing: ${full_cmd[*]}"
 
-        # Start the server in background to handle signals
-        "${full_cmd[@]}" &
-        PDFKB_PID=$!
+    # Diagnostics & safety: enable Python faulthandler and allow core dumps so
+    # crashes (native aborts) produce useful traces. Also limit OpenMP/MKL
+    # thread counts to reduce risk of native allocator/threading interactions
+    # that can lead to heap corruption in some native libraries.
+    export PYTHONFAULTHANDLER=1
+    ulimit -c unlimited || true
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+    export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
+    export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
+    export NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-1}
+
+    # Start the server in background to handle signals
+    "${full_cmd[@]}" &
+    PDFKB_PID=$!
 
         # Wait for the process to complete
         wait $PDFKB_PID
