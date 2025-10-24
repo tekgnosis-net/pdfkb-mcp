@@ -44,6 +44,16 @@ class ParseResult:
 
         return "\n\n".join(combined_parts)
 
+    @property
+    def markdown_content(self) -> str:
+        """Backward-compatible single-string markdown content.
+
+        Many tests and older code expect a top-level `markdown_content`
+        attribute on ParseResult. Provide a property that returns the
+        combined markdown for all pages.
+        """
+        return self.get_combined_markdown()
+
 
 class DocumentParser(ABC):
     """Abstract base class for document parsers.
