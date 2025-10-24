@@ -104,7 +104,8 @@ RUN uv pip install --system --no-cache -e . \
     fi \
     && pip uninstall -y opencv-python || true  # Remove GUI version to avoid conflicts with headless \
     && pip install --no-cache opencv-python-headless==4.11.0.86  # Ensure headless version is properly installed
-    && pip install --no-cache-dir marker-pdf>=1.10.0 || true \
+
+RUN pip install --no-cache-dir marker-pdf>=1.10.0 || true \
     && pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true
 
 # Build a wheel for the application so the runtime image can install it
