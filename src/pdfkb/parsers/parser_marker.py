@@ -187,8 +187,15 @@ class MarkerPDFParser(DocumentParser):
             pages = [PageContent(page_number=1, markdown_content=markdown_content, metadata={})]
             return ParseResult(pages=pages, metadata=metadata)
 
-        except ImportError:
-            raise ImportError("Marker library not available. Install with: pip install pdfkb-mcp[marker]")
+        except ImportError as e:
+            # Log the full ImportError traceback so runtime logs show the
+            # underlying cause (missing native lib, dependency issue, etc.).
+            # We still raise the friendly ImportError for callers but chain
+            # the original exception to preserve context.
+            logger.exception("Marker import failed during parser initialization")
+            raise ImportError(
+                "Marker library not available. Install with: pip install pdfkb-mcp[marker]"
+            ) from e
         except Exception as e:
             raise RuntimeError(f"Failed to parse PDF with Marker: {e}") from e
 
