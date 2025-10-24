@@ -89,7 +89,8 @@ jobs:
     needs: test-and-build
     strategy:
       matrix:
-        pdf-parser: [marker, mineru]
+        # Build a single combined image that includes both marker and mineru
+        pdf-parser: [all]
     permissions:
       contents: read
       packages: write
@@ -120,8 +121,7 @@ jobs:
         tags: |
           # Latest tag for main branch pushes (not tags)
           type=raw,value=latest,enable={{is_default_branch}}
-          # PDF parser specific tags
-          type=raw,value=${{ matrix.pdf-parser }}-latest,enable={{is_default_branch}}
+          # (No parser-specific tag) We build a single 'all' image and push only 'latest' for main
           # Branch-based tags for development
           type=ref,event=branch,enable=${{ !startsWith(github.ref, 'refs/tags/v') }}
           # PR-based tags
@@ -133,7 +133,7 @@ jobs:
           type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
         labels: |
           org.opencontainers.image.title=pdfkb-mcp
-          org.opencontainers.image.description=PDF Knowledgebase MCP Server - Document search with vector embeddings (PDF Parser: ${{ matrix.pdf-parser }})
+          org.opencontainers.image.description=PDF Knowledgebase MCP Server - Document search with vector embeddings
           org.opencontainers.image.source=https://github.com/tekgnosis-net/pdfkb-mcp
           org.opencontainers.image.licenses=MIT
           org.opencontainers.image.authors=Juan Villa <juanqui@villafam.com>
@@ -152,7 +152,7 @@ jobs:
           PDFKB_VERSION=${{ github.ref_name }}
           BUILD_DATE=${{ steps.meta.outputs.created }}
           VCS_REF=${{ github.sha }}
-          PDF_PARSER=${{ matrix.pdf-parser }}
+          PDF_PARSER=all
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -160,7 +160,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/v')
       uses: actions/attest-build-provenance@v1
       with:
-        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ matrix.pdf-parser }}-latest
+        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}:latest
         subject-digest: ${{ steps.build.outputs.digest }}
         push-to-registry: true
 
@@ -170,13 +170,13 @@ jobs:
         echo "📋 Image tags:"
         echo "${{ steps.meta.outputs.tags }}" | sed 's/^/  - /'
         echo ""
-        echo "🔧 PDF Parser: ${{ matrix.pdf-parser }}"
+  echo "🔧 PDF Parser: all"
         echo ""
         if [[ "${{ startsWith(github.ref, 'refs/tags/v') }}" == "true" ]]; then
           echo "🚀 RELEASE: Image pushed to registry with version tags"
           echo "💾 Image digest: ${{ steps.build.outputs.digest }}"
         elif [[ "${{ github.ref }}" == "refs/heads/main" && "${{ github.event_name }}" == "push" ]]; then
-          echo "🚀 MAIN: Image pushed to registry as 'latest' and '${{ matrix.pdf-parser }}-latest'"
+          echo "🚀 MAIN: Image pushed to registry as 'latest'"
           echo "💾 Image digest: ${{ steps.build.outputs.digest }}"
         else
           echo "ℹ️  Image built but not pushed (development/PR)"

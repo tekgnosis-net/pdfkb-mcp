@@ -5,12 +5,16 @@
 # Build arguments for customization
 ARG PYTHON_VERSION=3.11
 ARG PDFKB_VERSION=latest
-ARG PDF_PARSER=marker  # Options: marker, mineru
+ARG PDF_PARSER=mineru  # Options: marker, mineru, pymupdf4llm
+ARG USE_CUDA=false          # Build with CUDA-enabled PyTorch when "true"
+ARG CUDA_PYTORCH_TAG=cu118  # PyTorch CUDA wheel tag (e.g. cu118, cu121)
+ARG BASE_IMAGE=pytorch/pytorch:2.9.0-cuda13.0-cudnn9-runtime
+ARG RUNTIME_BASE_IMAGE=pytorch/pytorch:2.9.0-cuda13.0-cudnn9-runtime
 
 # ============================================================================
 # Stage 1: Builder - Install build dependencies and compile packages
 # ============================================================================
-FROM python:${PYTHON_VERSION}-slim AS builder
+FROM ${BASE_IMAGE} AS builder
 
 # Build arguments
 ARG TARGETPLATFORM
@@ -30,6 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     # For some native dependencies
     pkg-config \
+    # For HTTP requests (needed for font download)
+    curl \
+    # OpenCV system dependencies (needed for marker-pdf)
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
     # Cleanup cache
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,10 +62,18 @@ COPY README.md .
 # Install UV (Rust-based Python package installer) for faster builds
 RUN pip install --no-cache-dir --upgrade uv
 
-# Install CPU-only PyTorch first to avoid CUDA dependencies
-RUN uv pip install --system --no-cache \
-    --index-url https://download.pytorch.org/whl/cpu \
-    torch torchvision torchaudio
+# Install PyTorch: use CUDA wheels when requested, otherwise install CPU-only
+RUN if [ "$USE_CUDA" = "true" ]; then \
+        echo "Installing CUDA PyTorch wheels (tag: $CUDA_PYTORCH_TAG)"; \
+        pip uninstall -y torch torchvision torchaudio || true; \
+        uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG \
+            --upgrade --force-reinstall torch torchvision torchaudio; \
+    else \
+        echo "Installing CPU-only PyTorch wheels"; \
+        pip uninstall -y torch torchvision torchaudio || true; \
+        uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/cpu \
+            --upgrade --force-reinstall torch torchvision torchaudio; \
+    fi
 
 # Build arguments
 ARG PYTHON_VERSION
@@ -62,23 +82,38 @@ ARG PDF_PARSER
 
 # Install the package with remaining dependencies from pyproject.toml
 # PyTorch is now already installed with CPU-only support
-# Install all optional dependencies (use with caution - very large)
-# Needed as optionals are not working in the docker image
 
+# Install optional dependencies depending on PDF_PARSER. Support a special
+# value `all` which installs both marker and mineru extras.
 RUN uv pip install --system --no-cache -e . \
     && if [ "$PDF_PARSER" = "mineru" ]; then \
         uv pip install --system --no-cache -e ".[all-with-mineru]"; \
     elif [ "$PDF_PARSER" = "marker" ]; then \
         uv pip install --system --no-cache -e ".[all-with-marker]"; \
+    elif [ "$PDF_PARSER" = "all" ]; then \
+        # Install both marker and mineru extras
+        uv pip install --system --no-cache -e ".[all-with-marker]" \
+            -e ".[all-with-mineru]"; \
+        # Also ensure the actual third-party packages are present (some installers
+        # may not pull them into site-packages of the wheel layout). Installing
+        # them explicitly avoids missing imports at runtime.
+        pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
+        pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true; \
     else \
         uv pip install --system --no-cache -e ".[all-with-marker]"; \
     fi \
-    && pip uninstall -y pip setuptools wheel uv  # Remove build tools to save space
+    && pip uninstall -y opencv-python || true  # Remove GUI version to avoid conflicts with headless \
+    && pip install --no-cache opencv-python-headless==4.11.0.86  # Ensure headless version is properly installed
+
+# Build a wheel for the application so the runtime image can install it
+# This avoids building from source in the runtime (which would require build deps).
+RUN python -m pip wheel --no-deps -w /build/dist . \
+    && pip uninstall -y pip setuptools wheel uv || true  # Remove build tools to save space
 
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
 # ============================================================================
-FROM python:${PYTHON_VERSION}-slim AS runtime
+FROM ${RUNTIME_BASE_IMAGE} AS runtime
 
 # Build arguments
 ARG PYTHON_VERSION
@@ -106,6 +141,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     # SSL/TLS certificates
     ca-certificates \
+    # OpenCV runtime dependencies (needed for marker-pdf)
+    libglib2.0-0 \
+    libsm6 \
+    libgl1 \
+    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libegl1 \
+    libglvnd0 \
+    libglx0 \
+    libglx-mesa0 \
+    libglapi-mesa \
+    libxcb-glx0 \
+    libxxf86vm1 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgthread-2.0-0 \
     # Aggressive cleanup to minimize image size
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/archives/* \
@@ -115,6 +167,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /root/.cache \
     && find /usr/local -name "*.pyc" -delete \
     && find /usr/local -name "__pycache__" -type d -exec rm -rf {} + || true
+
+# Make build args available in runtime stage for conditional installs
+ARG USE_CUDA
+ARG CUDA_PYTORCH_TAG
+ARG PDF_PARSER
+
+# If building with CUDA support, ensure runtime has CUDA PyTorch wheels installed
+RUN if [ "$USE_CUDA" = "true" ]; then \
+        echo "Installing CUDA PyTorch wheels in runtime (tag: $CUDA_PYTORCH_TAG)"; \
+        pip uninstall -y torch torchvision torchaudio || true; \
+        pip install --no-cache-dir --index-url https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG \
+            --upgrade --force-reinstall torch torchvision torchaudio || true; \
+    else \
+        echo "Skipping CUDA runtime torch install (USE_CUDA=$USE_CUDA)"; \
+    fi
+# Ensure opencv headless is available at runtime (some wheel layouts miss cv2 when copied)
+RUN pip install --no-cache-dir opencv-python-headless==4.11.0.86 || true
 
 # Create non-root user for security
 RUN groupadd -r -g 1001 pdfkb && \
@@ -144,15 +213,66 @@ RUN mkdir -p ${PDFKB_APP_DIR} \
              /home/pdfkb/.local/bin && \
     chown -R pdfkb:pdfkb ${PDFKB_APP_DIR} /home/pdfkb
 
-# Switch to non-root user
-USER pdfkb
-
 # Set working directory
 WORKDIR ${PDFKB_APP_DIR}
 
-# Copy Python packages and installed libraries from builder stage
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy built wheel from the builder stage and install it in the runtime image.
+# This produces deterministic binary artifacts for the final image instead of
+# copying whole site-packages (which can lead to mismatched binary wheels).
+COPY --from=builder /build/dist /build/dist
+RUN if ls /build/dist/*.whl >/dev/null 2>&1; then \
+        pip install --no-cache-dir /build/dist/*.whl; \
+    else \
+        echo "No wheel found in /build/dist, falling back to editable install"; \
+        pip install --no-cache-dir -e .; \
+    fi
+
+# Install parser extras at runtime if requested (marker, mineru or both).
+RUN if [ "$PDF_PARSER" = "mineru" ]; then \
+        pip install --no-cache-dir "mineru[pipeline]>=2.1.10"; \
+    elif [ "$PDF_PARSER" = "marker" ]; then \
+        pip install --no-cache-dir marker-pdf>=1.10.0; \
+    elif [ "$PDF_PARSER" = "all" ]; then \
+        pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
+        pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true; \
+    else \
+        echo "No PDF parser extras requested (PDF_PARSER=${PDF_PARSER})"; \
+    fi
+
+# Download Marker font file at runtime so the final image sets correct
+# permissions for the non-root user that will run the server. Use Python
+# for downloading to avoid depending on external CLI tools being available
+# in every base image.
+RUN if [ "$PDF_PARSER" = "marker" ] || [ "$PDF_PARSER" = "all" ]; then \
+            mkdir -p /usr/local/lib/python3.11/site-packages/static/fonts && \
+            python -c "import urllib.request; urllib.request.urlretrieve('https://models.datalab.to/artifacts/GoNotoCurrent-Regular.ttf','/usr/local/lib/python3.11/site-packages/static/fonts/GoNotoCurrent-Regular.ttf')" && \
+            chmod 644 /usr/local/lib/python3.11/site-packages/static/fonts/GoNotoCurrent-Regular.ttf; \
+    else \
+        echo "Skipping font download (PDF_PARSER=${PDF_PARSER})"; \
+    fi
+
+# Ensure system GL libraries are present for opencv at runtime. Some base images
+# may not include these by default; install them explicitly here so cv2 can load
+# libGL.so.1 during import.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    libglvnd0 \
+    libglx0 \
+    libglx-mesa0 \
+    libglapi-mesa \
+    libxcb-glx0 \
+    libxxf86vm1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set ownership of static directory if it exists (for marker parser)
+# Make this tolerant: try to chown, but don't fail the build if some files
+# are not changeable (e.g., created by root in earlier stage). We'll also
+# ensure fonts are world-readable when downloaded in the builder stage so
+# the non-root `pdfkb` user can read them at runtime even if chown fails.
+RUN if [ -d "/usr/local/lib/python3.11/site-packages/static" ]; then \
+        chown -R pdfkb:pdfkb /usr/local/lib/python3.11/site-packages/static || true; \
+    fi
 
 # Copy application source code
 COPY --chown=pdfkb:pdfkb src/ src/
@@ -187,9 +307,12 @@ ENV PDFKB_EMBEDDING_PROVIDER=local \
     PDFKB_MAX_PARALLEL_PARSING=1 \
     PDFKB_MAX_PARALLEL_EMBEDDING=1 \
     PDFKB_BACKGROUND_QUEUE_WORKERS=2 \
-    PDFKB_PDF_PARSER=pymupdf4llm \
+    PDFKB_PDF_PARSER=marker \
     PDFKB_DOCUMENT_CHUNKER=langchain \
     PDFKB_MODEL_CACHE_DIR=/app/cache/models
+
+# Default to CUDA device for embeddings when image is built with CUDA support
+ENV PDFKB_EMBEDDING_DEVICE=cuda
 
 # Expose default ports
 # 8000: Unified web + mcp port
