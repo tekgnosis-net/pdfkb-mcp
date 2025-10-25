@@ -187,11 +187,15 @@ ensure_parser_extras_installed() {
 
     # Helper to attempt python import and pip install with retries if missing
     try_install() {
-        modulename="$1"; pkg="$2"; max_retries=${3:-3};
+        modulename="$1"; pkg="$2"; target_dir="$3"; max_retries=${4:-3};
         attempt=1
         while true; do
+            # Check import using a short python snippet that adds target_dir to sys.path
             if python - <<PY >/dev/null 2>&1
 import sys
+target = r"${target_dir}"
+if target and target not in sys.path:
+    sys.path.insert(0, target)
 try:
     __import__("${modulename}")
 except Exception:
@@ -202,10 +206,17 @@ PY
                 return 0
             fi
 
-            log_warn "${modulename} not found (attempt ${attempt}/${max_retries}), attempting pip install: ${pkg}"
+            log_warn "${modulename} not found (attempt ${attempt}/${max_retries}), attempting pip install: ${pkg} into ${target_dir}"
 
             # Use timeout if available to avoid hangs
-            if ${TIMEOUT_CMD} pip install --no-cache-dir --upgrade "${pkg}"; then
+            # Install into target_dir if provided so different parsers can coexist
+            if [ -n "${target_dir}" ]; then
+                install_cmd=(pip install --no-cache-dir --upgrade --target "${target_dir}" "${pkg}")
+            else
+                install_cmd=(pip install --no-cache-dir --upgrade "${pkg}")
+            fi
+
+            if ${TIMEOUT_CMD} "${install_cmd[@]}"; then
                 log_info "Successfully installed ${pkg}"
                 return 0
             else
@@ -223,13 +234,33 @@ PY
     }
 
     # Install marker extras if requested
+    # ensure base directory for parser-target installs
+    PARSERS_BASE_DIR="/opt/parsers"
+    mkdir -p "${PARSERS_BASE_DIR}"
+    if [[ -w "${PARSERS_BASE_DIR}" ]]; then
+        :
+    else
+        log_warn "${PARSERS_BASE_DIR} is not writable; parser installs may fail"
+    fi
+
     if [[ "${parser}" == "marker" || "${parser}" == "all" || "${parser}" == *"marker"* ]]; then
-        try_install marker "marker-pdf>=1.10.0" 3 || log_warn "Marker may still be unavailable"
+        marker_target="${PARSERS_BASE_DIR}/marker"
+        mkdir -p "${marker_target}"
+        try_install marker "marker-pdf>=1.10.0" "${marker_target}" 3 || log_warn "Marker may still be unavailable"
+        # Prepend to PYTHONPATH for current run if this parser is selected
+        if [[ "${parser}" == "marker" || "${parser}" == *"marker"* ]]; then
+            export PYTHONPATH="${marker_target}:${PYTHONPATH:-}"
+        fi
     fi
 
     # Install mineru extras if requested
     if [[ "${parser}" == "mineru" || "${parser}" == "all" || "${parser}" == *"mineru"* ]]; then
-        try_install mineru "mineru[pipeline]>=2.1.10" 3 || log_warn "MinerU may still be unavailable"
+        mineru_target="${PARSERS_BASE_DIR}/mineru"
+        mkdir -p "${mineru_target}"
+        try_install mineru "mineru[pipeline]>=2.1.10" "${mineru_target}" 3 || log_warn "MinerU may still be unavailable"
+        if [[ "${parser}" == "mineru" || "${parser}" == *"mineru"* ]]; then
+            export PYTHONPATH="${mineru_target}:${PYTHONPATH:-}"
+        fi
     fi
 
     # No-op for other parsers; they are included in the base package

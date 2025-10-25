@@ -313,6 +313,11 @@ RUN if [ -d "/usr/local/lib/python3.11/site-packages/static" ]; then \
 RUN mkdir -p /opt/conda/lib/python3.11/site-packages/static && \
     chown -R pdfkb:pdfkb /opt/conda/lib/python3.11/site-packages/static || true
 
+# Create a directory that runtime can use to install parser-specific packages
+# into isolated targets (so multiple incompatible parser deps can coexist).
+RUN mkdir -p /opt/parsers && \
+    chown -R pdfkb:pdfkb /opt/parsers || true
+
 # Copy application source code
 COPY --chown=pdfkb:pdfkb src/ src/
 COPY --chown=pdfkb:pdfkb pyproject.toml .
