@@ -186,6 +186,17 @@ ARG PDF_PARSER
 # Prevent interactive prompts during apt operations in the runtime image
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Ensure minimal, required system GL and glib libraries are present early in the
+# runtime stage so that opencv (cv2) can import at container start. Some base
+# images don't include these runtime libs even when Python wheels are present.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgl1-mesa-glx \
+        libgl1 \
+        libglib2.0-0 \
+    && ldconfig || true \
+    && rm -rf /var/lib/apt/lists/*
+
 # If building with CUDA support, ensure runtime has CUDA PyTorch wheels installed
 RUN if [ "$USE_CUDA" = "true" ]; then \
         echo "Installing CUDA PyTorch wheels in runtime (tag: $CUDA_PYTORCH_TAG)"; \
