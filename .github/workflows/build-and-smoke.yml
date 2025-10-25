@@ -68,6 +68,28 @@ jobs:
         run: |
           curl -sS http://localhost:9000/api/status || true
 
+      - name: Parser import checks (local built image)
+        run: |
+          set -euo pipefail
+          CONTAINER=pdfkb-pr-smoke
+          parsers=("docling" "marker" "mineru" "pymupdf4llm")
+          for p in "${parsers[@]}"; do
+            echo "Checking parser target /opt/parsers/$p importability in local-built image"
+            docker exec ${CONTAINER} sh -c "python3 - <<PY
+import sys
+target = '/opt/parsers/' + '${p}'
+if target not in sys.path:
+    sys.path.insert(0, target)
+try:
+    __import__('${p}')
+    print('OK: imported ${p}')
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    sys.exit(2)
+PY"
+          done
+
       - name: Run a sample search (best-effort)
         run: |
           set -euo pipefail

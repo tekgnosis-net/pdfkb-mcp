@@ -15,7 +15,8 @@ jobs:
 
       - name: Pull image
         run: |
-          docker pull ghcr.io/tekgnosis-net/pdfkb-mcp:all || true
+          # Pull the unified image published by CI (latest)
+          docker pull ghcr.io/tekgnosis-net/pdfkb-mcp:latest || true
 
       - name: Start container (CPU embeddings)
         run: |
@@ -42,6 +43,29 @@ jobs:
       - name: Run a basic API smoke (status)
         run: |
           curl -sS http://localhost:9000/api/status || true
+
+      - name: Parser import checks
+        run: |
+          set -euo pipefail
+          CONTAINER=pdfkb-smoke
+          parsers=("docling" "marker" "mineru" "pymupdf4llm")
+          for p in "${parsers[@]}"; do
+            echo "Checking parser target /opt/parsers/$p importability"
+            docker exec ${CONTAINER} sh -c "python3 - <<PY
+import sys
+target = '/opt/parsers/' + '${p}'
+if target not in sys.path:
+    sys.path.insert(0, target)
+try:
+    __import__('${p}')
+    print('OK: imported ${p}')
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    sys.exit(2)
+PY"
+            echo "Parser ${p} import returned: $?"
+          done
 
       - name: Teardown
         if: always()
