@@ -1,6 +1,7 @@
 ---
 description: "Agent instruction prompt - local assistant behaviour"
 mode: agent
+model: "GPT-5 mini"
 tools: []
 ---
 
