@@ -1,0 +1,75 @@
+name: Image Import Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Image to test (e.g., ghcr.io/owner/repo:tag or docker.io/library/repo:tag)'
+        required: true
+
+jobs:
+  import-smoke:
+    name: Import smoke tests inside built image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo (for workflow artifacts)
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Pull image
+        run: |
+          IMAGE=${{ github.event.inputs.image }}
+          echo "Testing image: $IMAGE"
+          docker pull "$IMAGE"
+
+      - name: Run import smoke checks in container
+        run: |
+          IMAGE=${{ github.event.inputs.image }}
+          set -euo pipefail
+
+          # Run a container and attempt to validate per-parser venvs and common parser imports.
+          docker run --rm "$IMAGE" sh -c '
+            set -e
+            echo "Listing /opt/parsers:"; ls -la /opt/parsers || true
+
+            # If per-parser venvs exist, run each venv's python and attempt a basic import check
+            for v in /opt/parsers/*/venv/bin/python; do
+              if [ -x "$v" ]; then
+                echo "Running import checks using venv interpreter: $v"
+                "$v" - <<'PY'
+import sys, importlib
+tests = ["marker_pdf", "pypdfium2", "pdftext"]
+results = {}
+for m in tests:
+    try:
+        importlib.import_module(m)
+        results[m] = True
+    except Exception as e:
+        results[m] = f"ERROR: {e}"
+print(results)
+PY
+              fi
+            done
+
+            # If no venvs were present, try imports with system python as a fallback
+            if [ ! -d /opt/parsers ] || [ -z "$(ls -A /opt/parsers 2>/dev/null)" ]; then
+              echo "No baked /opt/parsers detected; attempting imports in container python"
+              python - <<'PY'
+import sys, importlib
+tests = ["marker_pdf", "pypdfium2", "pdftext"]
+results = {}
+for m in tests:
+    try:
+        importlib.import_module(m)
+        results[m] = True
+    except Exception as e:
+        results[m] = f"ERROR: {e}"
+print(results)
+PY
+            fi
+          '
+
+      - name: Done
+        run: echo "Import smoke checks completed"

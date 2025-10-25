@@ -60,10 +60,15 @@ COPY src/ src/
 COPY README.md .
 
 # Install UV (Rust-based Python package installer) for faster builds
-RUN pip install --no-cache-dir --upgrade uv
+# Use BuildKit cache for pip to avoid repeated downloads and reduce transient disk usage.
+# Override PIP_NO_CACHE_DIR for this RUN so the cache mount is used locally.
+RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 pip install --upgrade uv
 
 # Install PyTorch: use CUDA wheels when requested, otherwise install CPU-only
-RUN if [ "$USE_CUDA" = "true" ]; then \
+# Use a BuildKit cache mount for pip downloads to reduce repeated network I/O
+# and transient disk usage. Temporarily enable pip caching for this RUN.
+RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
+    if [ "$USE_CUDA" = "true" ]; then \
         echo "Installing CUDA PyTorch wheels (tag: $CUDA_PYTORCH_TAG)"; \
         pip uninstall -y torch torchvision torchaudio || true; \
         uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG \
@@ -85,7 +90,8 @@ ARG PDF_PARSER
 
 # Install optional dependencies depending on PDF_PARSER. Support a special
 # value `all` which installs both marker and mineru extras.
-RUN uv pip install --system --no-cache -e . \
+RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
+    uv pip install --system --no-cache -e . \
     && if [ "$PDF_PARSER" = "mineru" ]; then \
         uv pip install --system --no-cache -e ".[all-with-mineru]"; \
     elif [ "$PDF_PARSER" = "marker" ]; then \
@@ -97,37 +103,73 @@ RUN uv pip install --system --no-cache -e . \
         # Also ensure the actual third-party packages are present (some installers
         # may not pull them into site-packages of the wheel layout). Installing
         # them explicitly avoids missing imports at runtime.
-        pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
-        pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true; \
+        pip install marker-pdf>=1.10.0 || true; \
+        pip install "mineru[pipeline]>=2.1.10" || true; \
     else \
         uv pip install --system --no-cache -e ".[all-with-marker]"; \
     fi \
     && pip uninstall -y opencv-python || true  # Remove GUI version to avoid conflicts with headless \
     && pip install --no-cache opencv-python-headless==4.11.0.86  # Ensure headless version is properly installed
 
-RUN pip install --no-cache-dir marker-pdf>=1.10.0 || true \
-    && pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true
+RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
+    pip install marker-pdf>=1.10.0 || true \
+    && pip install "mineru[pipeline]>=2.1.10" || true
 
 # Build a wheel for the application so the runtime image can install it
 # This avoids building from source in the runtime (which would require build deps).
-RUN python -m pip wheel --no-deps -w /build/dist . \
+RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
+    python -m pip wheel --no-deps -w /build/dist . \
     && pip uninstall -y pip setuptools wheel uv || true  # Remove build tools to save space
-
 # Create isolated virtualenvs for optional parsers in the builder stage so we can
 # copy them into the runtime image. This bakes heavy native wheels (torch,
 # pypdfium2, OpenCV, etc.) into per-parser venvs to avoid runtime installs.
-RUN python3 -m venv /build/venvs/marker && \
-    /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel && \
-    /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true && \
-    python3 -m venv /build/venvs/mineru && \
-    /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel && \
-    /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true && \
-    python3 -m venv /build/venvs/docling && \
-    /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel && \
-    /build/venvs/docling/bin/pip install docling>=2.43.0 || true && \
-    python3 -m venv /build/venvs/pymupdf4llm && \
-    /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel && \
-    /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true || true
+# Only create venvs for the parser(s) requested via the build-arg `PDF_PARSER`.
+RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 bash -lc '\
+    set -euo pipefail; \
+    pars="${PDF_PARSER:-all}"; \
+    IFS=","; for p in $pars; do \
+        p=$(echo "$p" | xargs); \
+        case "$p" in \
+            marker) \
+                echo "Creating marker venv"; \
+                python3 -m venv /build/venvs/marker; \
+                /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel || true; \
+                /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true; \
+                ;; \
+            mineru) \
+                echo "Creating mineru venv"; \
+                python3 -m venv /build/venvs/mineru; \
+                /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel || true; \
+                /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true; \
+                ;; \
+            docling) \
+                echo "Creating docling venv"; \
+                python3 -m venv /build/venvs/docling; \
+                /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel || true; \
+                /build/venvs/docling/bin/pip install docling>=2.43.0 || true; \
+                ;; \
+            pymupdf4llm) \
+                echo "Creating pymupdf4llm venv"; \
+                python3 -m venv /build/venvs/pymupdf4llm; \
+                /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel || true; \
+                /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true; \
+                ;; \
+            all) \
+                echo "Building all parser venvs"; \
+                for q in marker mineru docling pymupdf4llm; do \
+                    echo "-> $q"; \
+                    case "$q" in \
+                        marker) python3 -m venv /build/venvs/marker; /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true ;; \
+                        mineru) python3 -m venv /build/venvs/mineru; /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true ;; \
+                        docling) python3 -m venv /build/venvs/docling; /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/docling/bin/pip install docling>=2.43.0 || true ;; \
+                        pymupdf4llm) python3 -m venv /build/venvs/pymupdf4llm; /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true ;; \
+                    esac; \
+                done; \
+                ;; \
+            *) echo "Unknown parser: $p (skipping)" ;; \
+        esac; \
+    done'
+
 
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
@@ -139,6 +181,12 @@ ARG PYTHON_VERSION
 ARG PDFKB_VERSION
 ARG BUILD_DATE
 ARG VCS_REF
+ARG PDF_PARSER
+
+# Set the image default runtime parser to the build-time parser selection
+# This makes it less surprising when you build with --build-arg PDF_PARSER=docling
+# so the container default `PDFKB_PDF_PARSER` matches the baked venvs.
+ENV PDFKB_PDF_PARSER=${PDF_PARSER:-marker}
 
 # Add labels for metadata
 LABEL org.opencontainers.image.title="pdfkb-mcp" \
@@ -223,14 +271,14 @@ RUN if [ "$USE_CUDA" = "true" ]; then \
         echo "Skipping CUDA runtime torch install (USE_CUDA=$USE_CUDA)"; \
     fi
 # Ensure opencv headless is available at runtime (some wheel layouts miss cv2 when copied)
-RUN pip install --no-cache-dir opencv-python-headless==4.11.0.86 || true
+RUN pip install --no-cache-dir opencv-python-headless==4.11.0.86
 # Ensure redis client is available in runtime for optional Redis-backed scopes
 RUN pip install --no-cache-dir redis>=4.6.0 || true
 
 # Extra safety: ensure marker dependencies are present at runtime for the `all` tag.
 RUN if [ "$PDF_PARSER" = "all" ] || [ "$PDF_PARSER" = "marker" ]; then \
-        pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
-        pip install --no-cache-dir opencv-python-headless==4.11.0.86 || true; \
+    pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
+    pip install --no-cache-dir opencv-python-headless==4.11.0.86; \
     fi
 
 # Create non-root user for security

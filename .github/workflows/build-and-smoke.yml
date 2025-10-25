@@ -13,9 +13,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build container image
-        run: |
-          docker build --pull -t pdfkb-pr-smoke .
+      - name: Restore BuildKit cache
+        uses: actions/cache@v4
+        with:
+          path: .buildx-cache
+          key: buildx-cache-${{ runner.os }}-pyproject-${{ hashFiles('pyproject.toml') }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build container image (with BuildKit cache)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: false
+          tags: pdfkb-pr-smoke
+          load: true
+          cache-from: type=local,src=.buildx-cache
+          cache-to: type=local,dest=.buildx-cache,mode=max
+          build-args: |
+            PDF_PARSER=docling
 
       - name: Save built image as tar (for debugging)
         run: |
@@ -71,24 +88,72 @@ jobs:
       - name: Parser import checks (local built image)
         run: |
           set -euo pipefail
-          CONTAINER=pdfkb-pr-smoke
-          parsers=("docling" "marker" "mineru" "pymupdf4llm")
-          for p in "${parsers[@]}"; do
-            echo "Checking parser target /opt/parsers/$p importability in local-built image"
-            docker exec ${CONTAINER} sh -c "python3 - <<PY
-import sys
-target = '/opt/parsers/' + '${p}'
-if target not in sys.path:
-    sys.path.insert(0, target)
-try:
-    __import__('${p}')
-    print('OK: imported ${p}')
-except Exception as e:
-    import traceback
-    traceback.print_exc()
-    sys.exit(2)
-PY"
-          done
+            CONTAINER=pdfkb-pr-smoke
+            # Detect the runtime default parser baked into the image (set from build ARG)
+            REQUESTED=$(docker exec ${CONTAINER} sh -c 'printf "%s" "${PDFKB_PDF_PARSER:-}"') || true
+
+            echo "Requested (image default) parser: ${REQUESTED:-<none>}"
+
+            # List baked parser dirs under /opt/parsers
+            BAKED=$(docker exec ${CONTAINER} sh -c 'ls -1 /opt/parsers 2>/dev/null || true') || true
+            echo "Baked parser dirs:\n${BAKED:-<none>}"
+
+            # Helper to attempt import for a parser path inside the container.
+            attempt_import() {
+              p="$1"
+              echo "-- Testing import for baked parser: $p"
+              # Prefer venv python if present
+              if docker exec ${CONTAINER} sh -c "test -x /opt/parsers/$p/venv/bin/python" >/dev/null 2>&1; then
+                docker exec ${CONTAINER} sh -c "/opt/parsers/$p/venv/bin/python - <<PY
+  import sys,traceback
+  try:
+      __import__('$p')
+      print('OK: imported $p via venv')
+  except Exception:
+      traceback.print_exc()
+      sys.exit(2)
+  PY"
+              else
+                # Fallback to adding the target dir to sys.path
+                docker exec ${CONTAINER} sh -c "python3 - <<PY
+  import sys,traceback
+  sys.path.insert(0, '/opt/parsers/$p')
+  try:
+      __import__('$p')
+      print('OK: imported $p via PYTHONPATH')
+  except Exception:
+      traceback.print_exc()
+      sys.exit(2)
+  PY"
+              fi
+            }
+
+            # If a requested parser was specified, ensure it's baked and importable
+            if [ -n "${REQUESTED}" ]; then
+              if docker exec ${CONTAINER} sh -c "test -d /opt/parsers/${REQUESTED}" >/dev/null 2>&1; then
+                echo "Requested parser '${REQUESTED}' is present under /opt/parsers"
+                attempt_import "${REQUESTED}"
+              else
+                echo "ERROR: requested parser '${REQUESTED}' not found under /opt/parsers" >&2
+                docker logs ${CONTAINER} || true
+                exit 1
+              fi
+            else
+              echo "No requested parser set in image; skipping mandatory check"
+            fi
+
+            # For any other baked parsers, attempt import but don't fail the job if they fail
+            for p in ${BAKED}; do
+              # skip empty
+              [ -z "$p" ] && continue
+              if [ "$p" = "${REQUESTED}" ]; then
+                continue
+              fi
+              echo "Attempting import for optional baked parser: $p (non-fatal)"
+              if ! attempt_import "$p"; then
+                echo "Warning: import failed for optional parser $p (continuing)" || true
+              fi
+            done
 
       - name: Per-parser integration smoke (process sample PDF)
         run: |

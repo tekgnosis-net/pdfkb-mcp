@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import time
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -226,6 +228,29 @@ class PDFKnowledgebaseWebServer:
             except Exception as e:
                 logger.error(f"Failed to get status: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+
+        # Parser install status endpoint (read-only)
+        @self.app.get("/parser-install-status", tags=["System"])
+        async def parser_install_status():
+            """Return the contents of the runtime parser install status file (`/app/parser_install_status`).
+
+            This endpoint is read-only and intended for health/debug checks to see runtime
+            installer progress/status produced by `docker-entrypoint.sh`.
+            """
+            status_path = Path(os.environ.get("PDFKB_PARSER_STATUS_PATH", "/app/parser_install_status"))
+            if not status_path.exists():
+                raise HTTPException(status_code=404, detail="Parser install status file not found")
+            try:
+                content = status_path.read_text()
+                mtime = status_path.stat().st_mtime
+                return {
+                    "status_file": str(status_path),
+                    "last_updated": datetime.utcfromtimestamp(mtime).isoformat() + "Z",
+                    "content": content,
+                }
+            except Exception as e:
+                logger.error(f"Failed to read parser install status: {e}")
+                raise HTTPException(status_code=500, detail="Failed to read parser install status")
 
         # Configuration overview endpoint
         @self.app.get("/api/config", response_model=ConfigOverviewResponse, tags=["System"])
