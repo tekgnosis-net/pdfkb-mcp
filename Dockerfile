@@ -351,8 +351,11 @@ ENV PDFKB_EMBEDDING_DEVICE=cuda
 EXPOSE 8000
 
 # Health check for container orchestration
+# Use the absolute path to curl (ensures Docker can execute the binary even
+# if PATH is modified) and use the exec form so Docker interprets the
+# exit code directly.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PDFKB_SERVER_PORT}/health || exit 1
+    CMD ["/usr/bin/curl", "-f", "http://localhost:${PDFKB_SERVER_PORT}/health"]
 
 # Volume mount points for data persistence
 VOLUME ["${PDFKB_KNOWLEDGEBASE_PATH}", "${PDFKB_CACHE_DIR}", "${PDFKB_LOG_DIR}"]
