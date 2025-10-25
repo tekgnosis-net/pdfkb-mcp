@@ -168,102 +168,284 @@ setup_health_check() {
     fi
 }
 
-
-# Ensure parser extras (marker/mineru) are installed when requested via
-# the runtime environment variable `PDFKB_PDF_PARSER`.
-# This is a best-effort installer: it will try to import the required
-# package and, if missing, attempt a pip install. Failures are logged
-# but do not stop container startup.
-ensure_parser_extras_installed() {
-    parser="${PDFKB_PDF_PARSER:-pymupdf4llm}"
-    log_info "Ensuring parser extras for: ${parser} (this may install packages if missing)"
-
-    # Check if 'timeout' is available to bound pip install time
-    if command -v timeout >/dev/null 2>&1; then
-        TIMEOUT_CMD="timeout 120s"
-    else
-        TIMEOUT_CMD=""
+# Optional, optimized runtime installer for parsers
+# - Runs only when PDFKB_ALLOW_RUNTIME_PARSER_INSTALL=true
+# - Installs one or more parsers into /opt/parsers/<parser>/venv
+# - Uses a local wheels cache at /opt/parsers/wheels to reduce repeated downloads
+# - Supports configurable concurrency via PDFKB_PARSER_INSTALL_CONCURRENCY (default 2)
+# - Parsers to install: comma-separated PDFKB_PARSERS_TO_INSTALL or set PDFKB_INSTALL_ALL_PARSERS=true
+install_parsers_runtime() {
+    if [[ "${PDFKB_ALLOW_RUNTIME_PARSER_INSTALL:-false}" != "true" ]]; then
+        log_debug "Runtime parser install disabled (PDFKB_ALLOW_RUNTIME_PARSER_INSTALL!=true)"
+        return 0
     fi
 
-    # Helper to attempt python import and pip install with retries if missing
-    try_install() {
-        modulename="$1"; pkg="$2"; target_dir="$3"; max_retries=${4:-3};
-        attempt=1
-        while true; do
-            # Check import using a short python snippet that adds target_dir to sys.path
-            if python - <<PY >/dev/null 2>&1
-import sys
-target = r"${target_dir}"
-if target and target not in sys.path:
-    sys.path.insert(0, target)
-try:
-    __import__("${modulename}")
-except Exception:
-    sys.exit(2)
-PY
-            then
-                log_debug "${modulename} already importable"
-                return 0
-            fi
+    log_info "Runtime parser install enabled — preparing to install requested parsers"
 
-            log_warn "${modulename} not found (attempt ${attempt}/${max_retries}), attempting pip install: ${pkg} into ${target_dir}"
-
-            # Use timeout if available to avoid hangs
-            # Install into target_dir if provided so different parsers can coexist
-            if [ -n "${target_dir}" ]; then
-                install_cmd=(pip install --no-cache-dir --upgrade --target "${target_dir}" "${pkg}")
-            else
-                install_cmd=(pip install --no-cache-dir --upgrade "${pkg}")
-            fi
-
-            if ${TIMEOUT_CMD} "${install_cmd[@]}"; then
-                log_info "Successfully installed ${pkg}"
-                return 0
-            else
-                log_warn "pip install failed for ${pkg} (attempt ${attempt})"
-            fi
-
-            attempt=$((attempt+1))
-            if [[ ${attempt} -gt ${max_retries} ]]; then
-                log_warn "Exceeded max retries (${max_retries}) installing ${pkg}; giving up"
-                return 1
-            fi
-            # backoff before retrying
-            sleep $((attempt * 2))
-        done
-    }
-
-    # Install marker extras if requested
-    # ensure base directory for parser-target installs
     PARSERS_BASE_DIR="/opt/parsers"
-    mkdir -p "${PARSERS_BASE_DIR}"
-    if [[ -w "${PARSERS_BASE_DIR}" ]]; then
-        :
+    WHEELS_DIR="${PARSERS_BASE_DIR}/wheels"
+    mkdir -p "${PARSERS_BASE_DIR}" "${WHEELS_DIR}"
+
+    # Determine list of parsers to install
+    if [[ -n "${PDFKB_PARSERS_TO_INSTALL:-}" ]]; then
+        # comma or space separated
+        IFS=',' read -r -a _tmp_parsers <<< "${PDFKB_PARSERS_TO_INSTALL}"
+    elif [[ "${PDFKB_INSTALL_ALL_PARSERS:-false}" == "true" ]]; then
+        _tmp_parsers=(marker docling mineru pymupdf4llm)
     else
-        log_warn "${PARSERS_BASE_DIR} is not writable; parser installs may fail"
+        log_info "No parsers requested for runtime install. Set PDFKB_PARSERS_TO_INSTALL or PDFKB_INSTALL_ALL_PARSERS=true to enable."
+        return 0
     fi
 
-    if [[ "${parser}" == "marker" || "${parser}" == "all" || "${parser}" == *"marker"* ]]; then
-        marker_target="${PARSERS_BASE_DIR}/marker"
-        mkdir -p "${marker_target}"
-        try_install marker "marker-pdf>=1.10.0" "${marker_target}" 3 || log_warn "Marker may still be unavailable"
-        # Prepend to PYTHONPATH for current run if this parser is selected
-        if [[ "${parser}" == "marker" || "${parser}" == *"marker"* ]]; then
-            export PYTHONPATH="${marker_target}:${PYTHONPATH:-}"
+    # normalize parser list (trim spaces)
+    parsers=()
+    for p in "${_tmp_parsers[@]:-}"; do
+        p_trimmed=$(echo "$p" | xargs)
+        if [[ -n "$p_trimmed" ]]; then
+            parsers+=("$p_trimmed")
         fi
-    fi
+    done
 
-    # Install mineru extras if requested
-    if [[ "${parser}" == "mineru" || "${parser}" == "all" || "${parser}" == *"mineru"* ]]; then
-        mineru_target="${PARSERS_BASE_DIR}/mineru"
-        mkdir -p "${mineru_target}"
-        try_install mineru "mineru[pipeline]>=2.1.10" "${mineru_target}" 3 || log_warn "MinerU may still be unavailable"
-        if [[ "${parser}" == "mineru" || "${parser}" == *"mineru"* ]]; then
-            export PYTHONPATH="${mineru_target}:${PYTHONPATH:-}"
+    concurrency=${PDFKB_PARSER_INSTALL_CONCURRENCY:-2}
+    timeout_seconds=${PDFKB_PARSER_INSTALL_TIMEOUT_SEC:-1200}
+
+    log_info "Installing parsers: ${parsers[*]} (concurrency=${concurrency}, timeout=${timeout_seconds}s)"
+
+    declare -a pids=()
+
+    # Ensure lock dir exists for cross-container coordination when /opt/parsers is a shared volume
+    mkdir -p "${PARSERS_BASE_DIR}/.locks"
+    for parser in "${parsers[@]}"; do
+        venv_dir="${PARSERS_BASE_DIR}/${parser}/venv"
+        target_dir="${PARSERS_BASE_DIR}/${parser}"
+
+        if [[ -x "${venv_dir}/bin/python" ]]; then
+            log_info "Parser '${parser}' already has venv: ${venv_dir} — skipping"
+            continue
         fi
+
+        log_info "Scheduling install for parser: ${parser}"
+        (
+            set -euo pipefail
+            mkdir -p "${target_dir}"
+
+            lockfile="${PARSERS_BASE_DIR}/.locks/${parser}.lock"
+            status_file="${target_dir}/.install_status"
+
+            # Acquire an exclusive lock per-parser to avoid races when multiple
+            # containers start simultaneously using the same mounted /opt/parsers
+            log_info "Attempting to acquire lock for ${parser} (lockfile=${lockfile})"
+            # Use flock to serialize install operations; block up to timeout_seconds
+            if command -v flock >/dev/null 2>&1; then
+                exec 9>"${lockfile}"
+                if ! flock -w $(( timeout_seconds )) 9; then
+                    echo "LOCK_TIMEOUT" > "${status_file}"
+                    log_warn "Timed out waiting for lock on ${lockfile}; skipping install"
+                    exit 0
+                fi
+            else
+                # If flock is not available, fall back to a simple atomic mkdir lock
+                lockdir="${PARSERS_BASE_DIR}/.locks/${parser}.lockdir"
+                start=$(date +%s)
+                while ! mkdir "${lockdir}" 2>/dev/null; do
+                    sleep 1
+                    if [[ $(( $(date +%s) - start )) -ge ${timeout_seconds} ]]; then
+                        echo "LOCK_TIMEOUT" > "${status_file}"
+                        log_warn "Timed out waiting for mkdir-based lock ${lockdir}; skipping install"
+                        exit 0
+                    fi
+                done
+            fi
+
+            # At this point we hold the lock (via fd 9 or lockdir). Report progress.
+            echo "IN_PROGRESS: started $(date --iso-8601=seconds) pid=$$" > "${status_file}"
+
+            if ! command -v python3 >/dev/null 2>&1; then
+                echo "NO_PYTHON" > "${status_file}"
+                log_error "python3 not available in image; cannot create virtualenv for parser ${parser}"
+                # release lock
+                if [[ -n "${lockdir:-}" && -d "${lockdir}" ]]; then rmdir "${lockdir}" || true; fi
+                exit 1
+            fi
+
+            log_info "Creating venv for ${parser} at ${venv_dir}"
+            python3 -m venv "${venv_dir}"
+            "${venv_dir}/bin/pip" install --upgrade pip setuptools wheel || true
+
+            case "${parser}" in
+                marker)
+                    pkg_spec="marker-pdf>=1.10.0"
+                    ;;
+                mineru)
+                    pkg_spec="mineru[pipeline]>=2.1.10"
+                    ;;
+                docling)
+                    pkg_spec="docling>=2.43.0"
+                    ;;
+                pymupdf4llm)
+                    pkg_spec="pymupdf4llm>=0.0.27"
+                    ;;
+                *)
+                    pkg_spec="${parser}"
+                    ;;
+            esac
+
+            if [[ -n "${pkg_spec:-}" ]]; then
+                echo "DOWNLOADING: $(date --iso-8601=seconds) pkg=${pkg_spec}" >> "${status_file}"
+                log_info "Downloading wheels for ${pkg_spec} to ${WHEELS_DIR} (best-effort)"
+                # Try to download wheels first to the local cache. If it fails, fall back to direct install.
+                if ! "${venv_dir}/bin/pip" download --dest "${WHEELS_DIR}" --prefer-binary "${pkg_spec}" 2>/dev/null; then
+                    log_warn "Wheel download failed for ${pkg_spec}; will attempt direct install from PyPI"
+                fi
+
+                echo "INSTALLING_FROM_WHEELS: $(date --iso-8601=seconds) pkg=${pkg_spec}" >> "${status_file}"
+                log_info "Installing ${pkg_spec} into venv ${venv_dir} using wheels cache"
+                if ! timeout "${timeout_seconds}" "${venv_dir}/bin/pip" install --no-cache-dir --upgrade --find-links "${WHEELS_DIR}" "${pkg_spec}" >/dev/null 2>&1; then
+                    log_warn "Install from wheels cache failed for ${pkg_spec}; attempting network install"
+                    if ! timeout "${timeout_seconds}" "${venv_dir}/bin/pip" install --no-cache-dir --upgrade "${pkg_spec}"; then
+                        echo "FAILED: $(date --iso-8601=seconds) pkg=${pkg_spec}" > "${status_file}"
+                        log_error "Runtime install failed for ${parser} (pkg: ${pkg_spec})"
+                        # release lock
+                        if [[ -n "${lockdir:-}" && -d "${lockdir}" ]]; then rmdir "${lockdir}" || true; fi
+                        exit 1
+                    fi
+                fi
+                echo "DONE: $(date --iso-8601=seconds)" > "${status_file}"
+                log_info "Parser ${parser} installed into ${venv_dir}"
+            else
+                echo "NO_PKG_SPEC" > "${status_file}"
+                log_warn "No package spec known for parser '${parser}'; skipping install"
+            fi
+
+            # release lock
+            if [[ -n "${lockdir:-}" && -d "${lockdir}" ]]; then rmdir "${lockdir}" || true; fi
+            if [[ -n "${lockfile:-}" && -e "${lockfile}" ]]; then : >/dev/null; fi
+            # If we created fd 9 earlier, closing script will release flock automatically
+        ) &
+
+        pids+=("$!")
+
+        # simple concurrency control using PID list
+        while true; do
+            live=0
+            for pid in "${pids[@]:-}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    live=$((live+1))
+                fi
+            done
+            if [[ $live -lt $concurrency ]]; then
+                break
+            fi
+            sleep 1
+        done
+    done
+
+    # Wait for all installers to finish
+    for pid in "${pids[@]:-}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            wait "$pid" || log_warn "One of the parser installs exited with non-zero status"
+        fi
+    done
+
+    log_info "Runtime parser installation finished. To persist installs across container restarts, mount ${PARSERS_BASE_DIR} as a volume."
+
+    # Simple progress reporter: aggregate per-parser status files and write a
+    # single summary file that local health checks or orchestrators can inspect.
+    summary_file="/app/parser_install_status"
+    echo "Parser install summary: $(date --iso-8601=seconds)" > "${summary_file}"
+    for parser in "${parsers[@]}"; do
+        status_file="${PARSERS_BASE_DIR}/${parser}/.install_status"
+        if [[ -f "${status_file}" ]]; then
+            echo "${parser}: $(tail -n 5 "${status_file}" | tr '\n' ' | ')" >> "${summary_file}"
+        else
+            echo "${parser}: NOT_PRESENT" >> "${summary_file}"
+        fi
+    done
+
+    log_info "Wrote parser install summary to ${summary_file}"
+}
+
+
+# Select parser runtime environment without performing runtime uninstalls.
+# Strategy:
+# - If /opt/parsers/<parser>/venv exists, prefer that virtualenv by
+#   prepending its bin to PATH and setting VIRTUAL_ENV so the process
+#   runs fully isolated from the base image site-packages.
+# - Else if /opt/parsers/<parser> exists (pip --target installs), prepend
+#   it to PYTHONPATH for the current run.
+# - Do NOT attempt to uninstall packages at runtime (unsafe). A runtime
+#   pip install fallback is allowed only when explicitly enabled by
+#   PDFKB_ALLOW_RUNTIME_PARSER_INSTALL=true (not recommended for CI/production).
+select_parser_environment() {
+    parser="${PDFKB_PDF_PARSER:-pymupdf4llm}"
+    log_info "Selecting runtime environment for parser: ${parser}"
+
+    PARSERS_BASE_DIR="/opt/parsers"
+    venv_dir="${PARSERS_BASE_DIR}/${parser}/venv"
+    target_dir="${PARSERS_BASE_DIR}/${parser}"
+
+    # If a built virtualenv exists for this parser, prefer it
+    if [[ -x "${venv_dir}/bin/python" ]]; then
+        export VIRTUAL_ENV="${venv_dir}"
+        export PATH="${VIRTUAL_ENV}/bin:${PATH}"
+        log_info "Using parser virtualenv: ${VIRTUAL_ENV} (PATH updated)"
+        return 0
     fi
 
-    # No-op for other parsers; they are included in the base package
+    # If a pip --target directory exists, prepend it to PYTHONPATH
+    if [[ -d "${target_dir}" ]]; then
+        export PYTHONPATH="${target_dir}:${PYTHONPATH:-}"
+        log_info "Using parser target dir: ${target_dir} (prepended to PYTHONPATH)"
+        return 0
+    fi
+
+    log_warn "No baked parser environment found for '${parser}' in ${PARSERS_BASE_DIR}"
+    if [[ "${PDFKB_ALLOW_RUNTIME_PARSER_INSTALL:-false}" == "true" ]]; then
+        log_warn "PDFKB_ALLOW_RUNTIME_PARSER_INSTALL=true — attempting best-effort runtime install into ${target_dir}"
+        mkdir -p "${target_dir}"
+        # Use a short, conservative install attempt (no retries). This is
+        # intentionally minimal; prefer build-time installs in Dockerfile.
+        if command -v timeout >/dev/null 2>&1; then
+            timeout_cmd=(timeout 120s)
+        else
+            timeout_cmd=()
+        fi
+
+        case "${parser}" in
+            marker)
+                pkg_spec="marker-pdf>=1.10.0"
+                modulename="marker"
+                ;;
+            mineru)
+                pkg_spec="mineru[pipeline]>=2.1.10"
+                modulename="mineru"
+                ;;
+            docling)
+                pkg_spec="docling"
+                modulename="docling"
+                ;;
+            *)
+                pkg_spec=""
+                modulename="${parser}"
+                ;;
+        esac
+
+        if [[ -n "${pkg_spec}" ]]; then
+            log_info "Attempting runtime pip install ${pkg_spec} into ${target_dir} (best-effort)"
+            if ("${timeout_cmd[@]}" pip install --no-cache-dir --upgrade --target "${target_dir}" "${pkg_spec}"); then
+                export PYTHONPATH="${target_dir}:${PYTHONPATH:-}"
+                log_info "Runtime install succeeded; prepended ${target_dir} to PYTHONPATH"
+            else
+                log_warn "Runtime pip install failed for ${pkg_spec}; parser may be unavailable"
+            fi
+        else
+            log_warn "No install spec known for parser '${parser}'; skipping runtime install"
+        fi
+    else
+        log_info "Runtime parser installs are disabled (PDFKB_ALLOW_RUNTIME_PARSER_INSTALL not true). To enable, set PDFKB_ALLOW_RUNTIME_PARSER_INSTALL=true — note: runtime installs are not recommended for production."
+    fi
+
+    return 0
 }
 
 
@@ -292,10 +474,15 @@ main() {
     elif [[ "${1:-}" == "pdfkb-mcp" ]]; then
         log_info "Starting pdfkb-mcp server..."
 
-        # Try to ensure parser extras are present at runtime. This is
-        # best-effort and will not prevent the server from starting if
-        # installation fails (network or permissions may block installs).
-        ensure_parser_extras_installed
+    # Optionally install requested parsers at container start (if enabled).
+    # This installs per-parser virtualenvs under /opt/parsers/<parser>/venv
+    # and caches wheels under /opt/parsers/wheels to reduce repeated downloads.
+    install_parsers_runtime
+
+    # Select parser runtime environment. Prefer baked venvs or pip
+    # --target directories. Runtime installs are allowed only if
+    # PDFKB_ALLOW_RUNTIME_PARSER_INSTALL=true and are not recommended.
+    select_parser_environment
 
         # Build command arguments
         cmd_args=()

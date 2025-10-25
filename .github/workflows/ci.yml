@@ -166,6 +166,38 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+  - name: Parser import smoke checks (published image)
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    run: |
+    set -euo pipefail
+    IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+    echo "Pulling image $IMAGE"
+    docker pull $IMAGE || true
+    parsers=("docling" "marker" "mineru" "pymupdf4llm")
+    for p in "${parsers[@]}"; do
+      echo "Checking parser importability for '${p}' in image $IMAGE"
+      docker run --rm $IMAGE sh -c "python3 - <<PY
+import sys, os, subprocess
+venv_py = f'/opt/parsers/{p}/venv/bin/python'
+if os.path.exists(venv_py):
+    print('Using venv interpreter:', venv_py)
+    rc = subprocess.call([venv_py, '-c', f\"import {p}; print('OK: imported {p}')\"]) 
+    if rc != 0:
+        raise SystemExit(2)
+else:
+    target='/opt/parsers/' + '${p}'
+    if target not in sys.path:
+      sys.path.insert(0, target)
+    try:
+      __import__('${p}')
+      print('OK: imported ${p}')
+    except Exception as e:
+      import traceback
+      traceback.print_exc()
+      raise SystemExit(2)
+PY"
+    done
+
     # Ensure we also publish a stable ':all' tag for the combined image when we
     # push from main or on a version release. This lets users pull the baked
     # image as ghcr.io/<repo>/pdfkb-mcp:all.

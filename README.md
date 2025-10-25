@@ -147,6 +147,8 @@ The user guide includes:
 - **[🔧 Troubleshooting](docs/userguide/troubleshooting.md)** - Common issues and performance tuning
 - **[🎯 Advanced Features](docs/userguide/advanced.md)** - Document summarization and enterprise features
 
+**Parser configuration & baking:** See [docs/parsers.md](docs/parsers.md) for build-time baking vs runtime installer examples, recommended env vars, and health/progress checks.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

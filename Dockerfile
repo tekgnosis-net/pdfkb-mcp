@@ -113,6 +113,22 @@ RUN pip install --no-cache-dir marker-pdf>=1.10.0 || true \
 RUN python -m pip wheel --no-deps -w /build/dist . \
     && pip uninstall -y pip setuptools wheel uv || true  # Remove build tools to save space
 
+# Create isolated virtualenvs for optional parsers in the builder stage so we can
+# copy them into the runtime image. This bakes heavy native wheels (torch,
+# pypdfium2, OpenCV, etc.) into per-parser venvs to avoid runtime installs.
+RUN python3 -m venv /build/venvs/marker && \
+    /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel && \
+    /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true && \
+    python3 -m venv /build/venvs/mineru && \
+    /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel && \
+    /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true && \
+    python3 -m venv /build/venvs/docling && \
+    /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel && \
+    /build/venvs/docling/bin/pip install docling>=2.43.0 || true && \
+    python3 -m venv /build/venvs/pymupdf4llm && \
+    /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel && \
+    /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true || true
+
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
 # ============================================================================
@@ -258,6 +274,12 @@ RUN if ls /build/dist/*.whl >/dev/null 2>&1; then \
         echo "No wheel found in /build/dist, falling back to editable install"; \
         pip install --no-cache-dir -e .; \
     fi
+
+# Copy per-parser venvs created in the builder stage into runtime /opt/parsers.
+# These venvs allow the runtime to re-exec into a parser-specific interpreter
+# without performing heavy network installs at container start.
+COPY --from=builder /build/venvs /opt/parsers
+RUN chown -R pdfkb:pdfkb /opt/parsers || true
 
 # Install parser extras at runtime if requested (marker, mineru, docling or both).
 # We explicitly install `docling` for the `docling` and `all` configurations so the
