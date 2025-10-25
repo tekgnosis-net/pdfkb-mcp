@@ -90,6 +90,66 @@ except Exception as e:
 PY"
           done
 
+      - name: Per-parser integration smoke (process sample PDF)
+        run: |
+          set -euo pipefail
+          parsers=("docling" "marker" "mineru" "pymupdf4llm")
+          SAMPLE=tests/sample.pdf
+          if [ ! -f "$SAMPLE" ]; then
+            echo "Sample PDF not found at $SAMPLE" >&2
+            exit 1
+          fi
+
+          for p in "${parsers[@]}"; do
+            echo "--- Testing parser: $p ---"
+            # Ensure previous container is removed
+            docker rm -f pdfkb-pr-smoke || true
+
+            # Start container with parser selected
+            docker run -d --name pdfkb-pr-smoke -p 9000:8000 \
+              -e PDFKB_EMBEDDING_DEVICE=cpu -e PDFKB_PDF_PARSER="$p" \
+              pdfkb-pr-smoke
+
+            # Wait for /health (up to 2 minutes)
+            max=60; i=0; ok=0
+            while [ $i -lt $max ]; do
+              status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9000/health || echo "")
+              if [ "$status" = "200" ]; then ok=1; break; fi
+              i=$((i+1)); sleep 2
+            done
+            if [ $ok -ne 1 ]; then
+              echo "Container did not become healthy for parser $p" >&2
+              docker logs pdfkb-pr-smoke || true
+              docker rm -f pdfkb-pr-smoke || true
+              exit 1
+            fi
+
+            # Copy sample PDF into container to trigger file monitor processing
+            docker cp "$SAMPLE" pdfkb-pr-smoke:/app/documents/sample-${p}.pdf
+
+            # Wait for processing log message (up to 2 minutes)
+            found=0; attempts=0; max_attempts=60
+            while [ $attempts -lt $max_attempts ]; do
+              if docker logs --since 1s pdfkb-pr-smoke 2>&1 | egrep -i "Starting .* parsing|Processing PDF" >/dev/null 2>&1; then
+                found=1; break
+              fi
+              attempts=$((attempts+1)); sleep 2
+            done
+
+            if [ $found -eq 1 ]; then
+              echo "Parser $p processed sample (log found)"
+            else
+              echo "Parser $p did not process sample within timeout" >&2
+              docker logs pdfkb-pr-smoke || true
+              docker rm -f pdfkb-pr-smoke || true
+              exit 1
+            fi
+
+            # Teardown for this parser
+            docker rm -f pdfkb-pr-smoke || true
+            sleep 1
+          done
+
       - name: Run a sample search (best-effort)
         run: |
           set -euo pipefail
