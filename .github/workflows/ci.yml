@@ -169,21 +169,11 @@ jobs:
     # Ensure we also publish a stable ':all' tag for the combined image when we
     # push from main or on a version release. This lets users pull the baked
     # image as ghcr.io/<repo>/pdfkb-mcp:all.
-    - name: Push :all tag to GHCR
-      if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-      env:
-        REGISTRY: ${{ env.REGISTRY }}
-        IMAGE: ${{ env.IMAGE_NAME }}
-      run: |
-        echo "Pushing ':all' tag for built image"
-        echo "Digest: ${{ steps.build.outputs.digest }}"
-        # Ensure we're logged in (the login step runs conditionally earlier)
-        echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-
-        # Pull by digest (if pushed) and retag as :all
-        docker pull "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" || true
-        docker tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:all"
-        docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:all"
+    # NOTE: We intentionally do NOT publish an additional ':all' tag to GHCR.
+    # The pipeline builds a single combined image (PDF_PARSER=all) and publishes
+    # it using the 'latest' tag for the main branch and semantic version tags
+    # for release tags. Publishing an extra ':all' tag caused confusion and
+    # multiple image variants in the registry; avoid that to keep a single-image model.
 
     - name: Generate artifact attestation
       if: startsWith(github.ref, 'refs/tags/v')

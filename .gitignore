@@ -297,4 +297,7 @@ test_pdfs
 test_env
 
 # Docker
-docker-compose.yml
+# docker-compose.yml
+# NOTE: docker-compose.yml may contain local secrets. If you want to
+# commit a sanitized version into the repo, remove this entry. By
+# default it's commented out here to avoid accidental commits.
