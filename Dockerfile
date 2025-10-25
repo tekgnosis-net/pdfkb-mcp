@@ -277,6 +277,17 @@ RUN if [ "$PDF_PARSER" = "mineru" ]; then \
         echo "No PDF parser extras requested (PDF_PARSER=${PDF_PARSER})"; \
     fi
 
+# Pre-install parser packages into isolated targets so the final image contains
+# all parser implementations. Installing into separate targets avoids
+# conflicting dependency versions (for example, different Pillow pins required
+# by Marker vs MinerU) while keeping a single "latest" image that can run any
+# parser by prepending the selected target to PYTHONPATH at container start.
+RUN pip install --no-cache-dir --target /opt/parsers/marker marker-pdf>=1.10.0 || true && \
+    pip install --no-cache-dir --target /opt/parsers/mineru "mineru[pipeline]>=2.1.10" || true && \
+    pip install --no-cache-dir --target /opt/parsers/docling docling>=2.43.0 || true && \
+    pip install --no-cache-dir --target /opt/parsers/pymupdf4llm pymupdf4llm>=0.0.27 || true && \
+    chown -R pdfkb:pdfkb /opt/parsers || true
+
 
 # Download Marker font file at runtime so the final image sets correct
 # permissions for the non-root user that will run the server. Use Python
