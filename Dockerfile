@@ -259,17 +259,24 @@ RUN if ls /build/dist/*.whl >/dev/null 2>&1; then \
         pip install --no-cache-dir -e .; \
     fi
 
-# Install parser extras at runtime if requested (marker, mineru or both).
+# Install parser extras at runtime if requested (marker, mineru, docling or both).
+# We explicitly install `docling` for the `docling` and `all` configurations so the
+# runtime image always contains the parser runtime dependency (the builder may not
+# include it depending on build ARGs used during CI/image builds).
 RUN if [ "$PDF_PARSER" = "mineru" ]; then \
         pip install --no-cache-dir "mineru[pipeline]>=2.1.10"; \
     elif [ "$PDF_PARSER" = "marker" ]; then \
         pip install --no-cache-dir marker-pdf>=1.10.0; \
+    elif [ "$PDF_PARSER" = "docling" ]; then \
+        pip install --no-cache-dir docling>=2.43.0 || true; \
     elif [ "$PDF_PARSER" = "all" ]; then \
         pip install --no-cache-dir marker-pdf>=1.10.0 || true; \
         pip install --no-cache-dir "mineru[pipeline]>=2.1.10" || true; \
+        pip install --no-cache-dir docling>=2.43.0 || true; \
     else \
         echo "No PDF parser extras requested (PDF_PARSER=${PDF_PARSER})"; \
     fi
+
 
 # Download Marker font file at runtime so the final image sets correct
 # permissions for the non-root user that will run the server. Use Python
