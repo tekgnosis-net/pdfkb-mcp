@@ -1,0 +1,46 @@
+ #cloud-config
+hostname: github-runner
+manage_etc_hosts: true
+
+users:
+  - name: runner
+    gecos: GitHub Actions Runner
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+
+ssh_authorized_keys:
+  - "{{SSH_PUB_KEY}}"  # replace with your SSH public key or remove
+
+packages:
+  - jq
+  - curl
+  - git
+  - docker.io
+  - ca-certificates
+
+runcmd:
+  # Basic system preparation
+  - [ bash, -lc, 'set -eux; apt-get update -y' ]
+  - [ bash, -lc, 'apt-get install -y jq curl git docker.io ca-certificates' ]
+  - [ bash, -lc, 'systemctl enable --now docker' ]
+  - [ bash, -lc, 'groupadd -f docker || true; usermod -aG docker runner || true' ]
+  - [ bash, -lc, 'mkdir -p /home/runner/actions-runner; chown -R runner:runner /home/runner' ]
+
+  # Download and extract latest GitHub Actions runner
+  - [ bash, -lc, "LATEST_TAG=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name) && TAG_NO_V=${LATEST_TAG#v} && cd /home/runner && curl -sL \"https://github.com/actions/runner/releases/download/${LATEST_TAG}/actions-runner-linux-x64-${TAG_NO_V}.tar.gz\" | sudo -u runner tar xz -C actions-runner" ]
+
+  # Configure the runner (replace OWNER/REPO, RUNNER_TOKEN and RUNNER_NAME before using)
+  - [ bash, -lc, "cd /home/runner/actions-runner && sudo -u runner ./config.sh --unattended --url https://github.com/OWNER/REPO --token 'RUNNER_TOKEN' --name 'RUNNER_NAME' --work _work || ( echo 'Runner config failed' >&2; exit 1 )" ]
+
+  # Install as a service and start
+  - [ bash, -lc, "cd /home/runner/actions-runner && sudo -u runner ./svc.sh install && sudo -u runner ./svc.sh start" ]
+
+  - [ bash, -lc, "echo 'runner setup complete' >> /var/log/runner-setup.log" ]
+
+final_message: "Cloud-init finished. See /var/log/runner-setup.log and /home/runner/actions-runner/_diag for details."
+
+# NOTES:
+# - Before using this template, replace placeholders: OWNER/REPO, RUNNER_TOKEN, RUNNER_NAME, and optionally SSH_PUB_KEY.
+# - For Proxmox: add this file as the VM's cloud-init user-data (Proxmox cloud-init drive) or paste into the 'User Data' field.
+# - The runner token must be generated via the GitHub API (short-lived) and provided here.
