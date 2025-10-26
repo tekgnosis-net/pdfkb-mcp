@@ -128,6 +128,7 @@ RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
 # Only create venvs for the parser(s) requested via the build-arg `PDF_PARSER`.
 RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 bash -lc '\
     set -euo pipefail; \
+    mkdir -p /build/venvs; \
     if [ "${SKIP_PARSER_VENVS:-false}" = "true" ]; then \
         echo "SKIP_PARSER_VENVS=true: skipping per-parser venv creation in builder"; \
     else \
