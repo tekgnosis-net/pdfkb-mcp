@@ -1,4 +1,4 @@
-name: Nightly Image Build — run#${{ github.run_number }} — ${{ github.actor }}
+name: "Nightly Image Build — run#${{ github.run_number }} — ${{ github.actor }}"
 
 # Builds and pushes the heavy, parser-baked Docker image on a nightly schedule
 # and on manual dispatch. This keeps the regular CI (pushes/PRs) fast and avoids

@@ -1,4 +1,4 @@
-name: GHCR Cleanup — ${{ github.event_name }}
+name: "GHCR Cleanup — ${{ github.event_name }}"
 
 # Periodically remove temporary GHCR package versions created by the CI
 # (examples: pr-<run_id> temporary validation images, nightly-<date> tags).
