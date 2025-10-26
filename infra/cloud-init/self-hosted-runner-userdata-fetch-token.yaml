@@ -1,0 +1,66 @@
+ #cloud-config
+hostname: github-runner
+manage_etc_hosts: true
+
+users:
+  - name: runner
+    gecos: GitHub Actions Runner
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+
+ssh_authorized_keys:
+  - "{{SSH_PUB_KEY}}"  # optional: replace with your SSH public key
+
+packages:
+  - jq
+  - curl
+  - git
+  - docker.io
+  - ca-certificates
+
+runcmd:
+  - [ bash, -lc, 'set -eux; apt-get update -y' ]
+  - [ bash, -lc, 'apt-get install -y jq curl git docker.io ca-certificates' ]
+  - [ bash, -lc, 'systemctl enable --now docker' ]
+  - [ bash, -lc, 'groupadd -f docker || true; usermod -aG docker runner || true' ]
+  - [ bash, -lc, 'mkdir -p /home/runner/actions-runner; chown -R runner:runner /home/runner' ]
+
+  # Download latest runner release
+  - [ bash, -lc, "LATEST_TAG=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name) && TAG_NO_V=${LATEST_TAG#v} && cd /home/runner && curl -sL \"https://github.com/actions/runner/releases/download/${LATEST_TAG}/actions-runner-linux-x64-${TAG_NO_V}.tar.gz\" | sudo -u runner tar xz -C actions-runner" ]
+
+  # Fetch registration token from a secure endpoint (preferred) or fallback to RUNNER_TOKEN placeholder
+  # Required placeholders (set in Proxmox cloud-init 'User Data' or via templating):
+  # - RUNNER_TOKEN_ENDPOINT: URL that returns JSON {"token": "..."}
+  # - RUNNER_TOKEN_SECRET: optional header/secret used to authenticate the request
+  - [ bash, -lc, "set -eux; \
+      if [ -n \"\${RUNNER_TOKEN_ENDPOINT:-}\" ]; then \
+        echo 'Fetching runner token from endpoint'; \
+        if [ -n \"\${RUNNER_TOKEN_SECRET:-}\" ]; then \
+          TOKEN_JSON=$(curl -sS -H \"Authorization: Bearer ${RUNNER_TOKEN_SECRET}\" \"${RUNNER_TOKEN_ENDPOINT}\"); \
+        else \
+          TOKEN_JSON=$(curl -sS \"${RUNNER_TOKEN_ENDPOINT}\"); \
+        fi; \
+        RUNNER_TOKEN=$(echo "$TOKEN_JSON" | jq -r .token); \
+      else \
+        echo 'No RUNNER_TOKEN_ENDPOINT provided, falling back to RUNNER_TOKEN placeholder'; \
+        RUNNER_TOKEN=${RUNNER_TOKEN:-''}; \
+      fi; \
+      if [ -z \"$RUNNER_TOKEN\" ]; then echo 'No runner token available' >&2; exit 1; fi; \
+      echo 'Token acquired (masked)'; \
+    " ]
+
+  # Configure runner with acquired token
+  - [ bash, -lc, "cd /home/runner/actions-runner && sudo -u runner ./config.sh --unattended --url https://github.com/OWNER/REPO --token \"$RUNNER_TOKEN\" --name 'RUNNER_NAME' --work _work || ( echo 'Runner config failed' >&2; exit 1 )" ]
+
+  # Install and start as a service
+  - [ bash, -lc, "cd /home/runner/actions-runner && sudo -u runner ./svc.sh install && sudo -u runner ./svc.sh start" ]
+
+  - [ bash, -lc, "echo 'runner setup complete' >> /var/log/runner-setup.log" ]
+
+final_message: "Cloud-init finished. See /var/log/runner-setup.log and /home/runner/actions-runner/_diag for details."
+
+# Notes:
+# - Replace OWNER/REPO and RUNNER_NAME in the config command or template them appropriately when instantiating the VM.
+# - Provide RUNNER_TOKEN_ENDPOINT and optionally RUNNER_TOKEN_SECRET via your cloud-init input (Proxmox user data) or use a templating system to inject the values at VM creation time.
+# - The endpoint must return a JSON object with a `token` field: {"token":"<short-lived-token>"}

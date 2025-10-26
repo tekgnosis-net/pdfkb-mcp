@@ -21,4 +21,6 @@ When acting as an automated assistant/agent for this repository, follow these ru
 
 7) Periodic save cadence: save after any substantial change (edit/create files, run CI-affecting commands, or modify the todo list). Prefer human confirmation before saving very large logs.
 
+8) Always verify yaml syntax: before saving and committing any yaml files, ensure they are syntactically correct to prevent configuration issues.
+
 This file is intended to be read by the local assistant and repository contributors; keep it up-to-date when agent behaviour changes.
