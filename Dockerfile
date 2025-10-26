@@ -60,6 +60,15 @@ COPY pyproject.toml .
 COPY src/ src/
 COPY README.md .
 
+# If present in the build context, copy a wheelhouse of pre-downloaded binary
+# wheels into the builder. Downstream pip installs will prefer wheels found in
+# /wheels via PIP_FIND_LINKS which reduces repeated network downloads and
+# transient disk usage on CI runners.
+COPY wheels /wheels
+
+# Prefer local wheels when available
+ENV PIP_FIND_LINKS=/wheels
+
 # Install UV (Rust-based Python package installer) for faster builds
 # Use BuildKit cache for pip to avoid repeated downloads and reduce transient disk usage.
 # Override PIP_NO_CACHE_DIR for this RUN so the cache mount is used locally.

@@ -1,4 +1,4 @@
-name: Nightly Image Build
+name: Nightly Image Build — run#${{ github.run_number }} — ${{ github.actor }}
 
 # Builds and pushes the heavy, parser-baked Docker image on a nightly schedule
 # and on manual dispatch. This keeps the regular CI (pushes/PRs) fast and avoids
@@ -32,6 +32,35 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up pip cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-nightly-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Build wheelhouse for nightly
+      run: |
+        set -euo pipefail
+        mkdir -p wheels
+        python -m pip install --upgrade pip
+        PIP_NO_CACHE_DIR=0 pip download --dest wheels --only-binary=:all: \
+          marker-pdf "mineru[pipeline]" docling pymupdf4llm opencv-python-headless \
+          torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu || true
+
+    - name: Upload nightly wheelhouse artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheelhouse-nightly
+        path: wheels/
+        retention-days: 7
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -74,6 +103,7 @@ jobs:
           BUILD_DATE=${{ steps.meta.outputs.created }}
           VCS_REF=${{ github.sha }}
           PDF_PARSER=all
+          SKIP_PARSER_VENVS=false
         # Use GitHub Actions cache export/import for buildkit to reduce repeated downloads
         cache-from: type=gha
         cache-to: type=gha,mode=max
