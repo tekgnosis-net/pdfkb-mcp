@@ -1,4 +1,15 @@
  #cloud-config
+# Cloud-init template variables (replace or render via infra/proxmox/render-cloudinit.sh):
+# {{OWNER}}            - GitHub owner (user or org)
+# {{REPO}}             - Repository name (if registering as repo runner) OR leave empty for org-level
+# {{GITHUB_URL}}       - Base GitHub URL (default: https://github.com)
+# {{RUNNER_NAME}}      - Friendly runner name (e.g. proxmox-runner-01)
+# {{RUNNER_TOKEN}}     - Short-lived registration token (required if no RUNNER_TOKEN_ENDPOINT)
+# {{RUNNER_TOKEN_ENDPOINT}} - (optional) URL to fetch token JSON {"token":"..."}
+# {{RUNNER_TOKEN_SECRET}}  - (optional) secret header value used when calling token endpoint
+# {{RUNNER_REMOVE_PAT}} - Personal access token (repo or org admin) used to deregister runner on shutdown (optional)
+# {{SSH_PUB_KEY}}      - SSH public key for the runner user (optional)
+
 hostname: github-runner
 manage_etc_hosts: true
 
@@ -10,7 +21,7 @@ users:
     lock_passwd: false
 
 ssh_authorized_keys:
-  - "{{SSH_PUB_KEY}}"  # replace with your SSH public key or remove
+  - "{{SSH_PUB_KEY}}"
 
 packages:
   - jq
@@ -30,17 +41,75 @@ runcmd:
   # Download and extract latest GitHub Actions runner
   - [ bash, -lc, "LATEST_TAG=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name) && TAG_NO_V=${LATEST_TAG#v} && cd /home/runner && curl -sL \"https://github.com/actions/runner/releases/download/${LATEST_TAG}/actions-runner-linux-x64-${TAG_NO_V}.tar.gz\" | sudo -u runner tar xz -C actions-runner" ]
 
-  # Configure the runner (replace OWNER/REPO, RUNNER_TOKEN and RUNNER_NAME before using)
-  - [ bash, -lc, "cd /home/runner/actions-runner && sudo -u runner ./config.sh --unattended --url https://github.com/OWNER/REPO --token 'RUNNER_TOKEN' --name 'RUNNER_NAME' --work _work || ( echo 'Runner config failed' >&2; exit 1 )" ]
+  # Acquire registration token: prefer endpoint if provided, otherwise use RUNNER_TOKEN
+  - [ bash, -lc, "set -eux; OWNER='{{OWNER}}'; REPO='{{REPO}}'; GITHUB_URL='{{GITHUB_URL}}'; TOKEN='{{RUNNER_TOKEN}}'; ENDPOINT='{{RUNNER_TOKEN_ENDPOINT}}'; SECRET='{{RUNNER_TOKEN_SECRET}}'; \
+      if [ -n \"$ENDPOINT" ] && [ "$ENDPOINT" != '{{RUNNER_TOKEN_ENDPOINT}}' ]; then \
+        if [ -n \"$SECRET" ] && [ "$SECRET" != '{{RUNNER_TOKEN_SECRET}}' ]; then \
+          TOKEN_JSON=$(curl -sS -H \"Authorization: Bearer $SECRET\" \"$ENDPOINT\"); \
+        else \
+          TOKEN_JSON=$(curl -sS \"$ENDPOINT\"); \
+        fi; TOKEN=$(echo "$TOKEN_JSON" | jq -r .token); \
+      fi; \
+      if [ -z \"$TOKEN\" ] || [ "$TOKEN" = '{{RUNNER_TOKEN}}' ]; then \
+         TOKEN='{{RUNNER_TOKEN}}'; \
+      fi; \
+      if [ -z \"$TOKEN\" ]; then echo 'No runner token available' >&2; exit 1; fi; \
+      echo 'Token acquired (masked)'; \
+      export RUNNER_TOKEN_VAL="$TOKEN"; " ]
+
+  # Configure the runner (supports repo or org registration)
+  - [ bash, -lc, "cd /home/runner/actions-runner; if [ -n '{{REPO}}' -a '{{REPO}}' != '']; then URL=${GITHUB_URL}/${OWNER}/${REPO}; else URL=${GITHUB_URL}/${OWNER}; fi; sudo -u runner ./config.sh --unattended --url \"$URL\" --token \"$RUNNER_TOKEN_VAL\" --name '{{RUNNER_NAME}}' --work _work || ( echo 'Runner config failed' >&2; exit 1 )" ]
 
   # Install as a service and start
   - [ bash, -lc, "cd /home/runner/actions-runner && sudo -u runner ./svc.sh install && sudo -u runner ./svc.sh start" ]
+
+  # Create deregistration helper (optional, requires RUNNER_REMOVE_PAT to be set in vars)
+  - [ bash, -lc, "cat >/usr/local/bin/runner-deregister.sh <<'RDR' && chmod +x /usr/local/bin/runner-deregister.sh
+#!/usr/bin/env bash
+set -euo pipefail
+OWNER='{{OWNER}}'
+REPO='{{REPO}}'
+TOKEN='{{RUNNER_REMOVE_PAT}}'
+NAME='{{RUNNER_NAME}}'
+if [ -z "$TOKEN" ]; then echo 'No RUNNER_REMOVE_PAT provided; skipping deregistration' >&2; exit 0; fi
+if [ -n "$REPO" ]; then API=https://api.github.com/repos/$OWNER/$REPO/actions/runners; else API=https://api.github.com/orgs/$OWNER/actions/runners; fi
+RUNNER_ID=$(curl -sS -H "Authorization: token $TOKEN" "$API" | jq -r ".runners[] | select(.name==\"$NAME\") | .id") || true
+if [ -z "$RUNNER_ID" ]; then echo 'Runner ID not found; nothing to delete'; exit 0; fi
+echo "Deleting runner id=$RUNNER_ID"
+curl -sS -X DELETE -H "Authorization: token $TOKEN" "$API/$RUNNER_ID"
+RDR" ]
+
+  # Register a systemd unit that runs deregistration on shutdown
+  - [ bash, -lc, "cat >/etc/systemd/system/runner-deregister.service <<'UNIT' && systemctl daemon-reload
+[Unit]
+Description=Deregister GitHub Actions runner on shutdown
+DefaultDependencies=no
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/runner-deregister.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT" ]
+
+  - [ bash, -lc, "systemctl enable runner-deregister.service || true" ]
 
   - [ bash, -lc, "echo 'runner setup complete' >> /var/log/runner-setup.log" ]
 
 final_message: "Cloud-init finished. See /var/log/runner-setup.log and /home/runner/actions-runner/_diag for details."
 
-# NOTES:
-# - Before using this template, replace placeholders: OWNER/REPO, RUNNER_TOKEN, RUNNER_NAME, and optionally SSH_PUB_KEY.
-# - For Proxmox: add this file as the VM's cloud-init user-data (Proxmox cloud-init drive) or paste into the 'User Data' field.
-# - The runner token must be generated via the GitHub API (short-lived) and provided here.
+# Notes:
+# - Replace placeholders or render template with infra/proxmox/render-cloudinit.sh prior to uploading to Proxmox.
+# - Variables to set (examples):
+#   OWNER=tekgnosis-net
+#   REPO=pdfkb-mcp
+#   GITHUB_URL=https://github.com
+#   RUNNER_NAME=proxmox-runner-01
+#   RUNNER_TOKEN=<short-lived token or leave empty if using RUNNER_TOKEN_ENDPOINT>
+#   RUNNER_TOKEN_ENDPOINT=https://token-service.internal/get-runner-token?repo=OWNER/REPO
+#   RUNNER_TOKEN_SECRET=<secret>
+#   RUNNER_REMOVE_PAT=<PAT with repo:admin or org admin>   # optional but required for automatic deregistration

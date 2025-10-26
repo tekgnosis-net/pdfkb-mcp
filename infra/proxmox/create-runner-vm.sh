@@ -24,6 +24,10 @@ if ! command -v qm >/dev/null 2>&1; then
   exit 1
 fi
 
+# Optional cloud-init template and vars (rendered) - pass as args 5 and 6
+TEMPLATE_PATH=${5:-}
+VARS_FILE=${6:-}
+
 # Prepare paths
 IMG_NAME="vm-${VMID}-cloudimg.img"
 IMG_PATH="/var/lib/vz/template/iso/${IMG_NAME}"
@@ -50,7 +54,17 @@ qm set $VMID --serial0 socket --vga serial0
 # Set VM to use cloud-init user data via storage snippets
 SNIPPET_NAME="user-data-${VMID}.yaml"
 SNIPPET_PATH="/tmp/${SNIPPET_NAME}"
-cat > "$SNIPPET_PATH" <<'EOF'
+
+if [ -n "$TEMPLATE_PATH" ]; then
+  echo "Rendering cloud-init template $TEMPLATE_PATH"
+  if [ ! -f "$(dirname "$0")/render-cloudinit.sh" ]; then
+    echo "render-cloudinit.sh not found in infra/proxmox; please ensure it exists." >&2
+    exit 1
+  fi
+  # Render into SNIPPET_PATH using bash to avoid requiring executable bit
+  bash "$(dirname "$0")/render-cloudinit.sh" "$TEMPLATE_PATH" "$VARS_FILE" > "$SNIPPET_PATH"
+else
+  cat > "$SNIPPET_PATH" <<'EOF'
 #cloud-config
 password: runner
 chpasswd: { expire: False }
@@ -64,6 +78,7 @@ users:
 runcmd:
   - [ bash, -lc, 'mkdir -p /home/runner/actions-runner' ]
 EOF
+fi
 
 # Upload snippet to Proxmox storage 'local:snippets'
 if ! pvesm available >/dev/null 2>&1; then
