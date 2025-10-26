@@ -114,7 +114,7 @@ jobs:
         set -euo pipefail
         IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
         echo "Pulling image $IMAGE for verification"
-        docker pull "$IMAGE" || true
+          docker pull "$IMAGE" || true
 
     - name: Run parser verification container
       if: always()
@@ -137,6 +137,6 @@ jobs:
       run: |
         docker stop pdfkb-nightly-smoke || true
 
-    - name: Post: cleanup
+    - name: "Post: cleanup"
       if: always()
       run: echo "Nightly image build finished."

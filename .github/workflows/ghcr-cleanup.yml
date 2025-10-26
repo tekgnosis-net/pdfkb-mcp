@@ -53,88 +53,88 @@ jobs:
           curl -sS -H "Authorization: token ${GITHUB_TOKEN}" "$API" > /tmp/ghcr_versions.json
           echo "Saved /tmp/ghcr_versions.json (size=$(wc -c < /tmp/ghcr_versions.json))"
 
-    - name: Identify and delete old package versions
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      OWNER: ${{ env.OWNER }}
-      PACKAGE_NAME: ${{ env.PACKAGE_NAME }}
-      DEFAULT_PR_TTL: ${{ env.DEFAULT_PR_TTL_DAYS }}
-      DEFAULT_NIGHTLY_TTL: ${{ env.DEFAULT_NIGHTLY_TTL_DAYS }}
-      DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'true' }}
-      PR_TTL_INPUT: ${{ github.event.inputs.pr_ttl_days || '' }}
-      NIGHTLY_TTL_INPUT: ${{ github.event.inputs.nightly_ttl_days || '' }}
-    run: |
-      set -euo pipefail
-      python3 - <<'PY'
-import json, os, subprocess, datetime
-from dateutil import parser
+      - name: Identify and delete old package versions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ env.OWNER }}
+          PACKAGE_NAME: ${{ env.PACKAGE_NAME }}
+          DEFAULT_PR_TTL: ${{ env.DEFAULT_PR_TTL_DAYS }}
+          DEFAULT_NIGHTLY_TTL: ${{ env.DEFAULT_NIGHTLY_TTL_DAYS }}
+          DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'true' }}
+          PR_TTL_INPUT: ${{ github.event.inputs.pr_ttl_days || '' }}
+          NIGHTLY_TTL_INPUT: ${{ github.event.inputs.nightly_ttl_days || '' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, datetime
+          from dateutil import parser
 
-fn = '/tmp/ghcr_versions.json'
-data = json.load(open(fn))
-now = datetime.datetime.utcnow()
+          fn = '/tmp/ghcr_versions.json'
+          data = json.load(open(fn))
+          now = datetime.datetime.utcnow()
 
-def age_days(iso):
-  dt = parser.isoparse(iso)
-  return (now - dt).days
+          def age_days(iso):
+              dt = parser.isoparse(iso)
+              return (now - dt).days
 
-# Determine TTLs: priority (1) workflow input, (2) repo secret env (GHCR_PR_TTL_DAYS/GHCR_NIGHTLY_TTL_DAYS), (3) defaults
-def int_or_default(v, default):
-  try:
-    return int(v)
-  except Exception:
-    return int(default)
+          # Determine TTLs: priority (1) workflow input, (2) repo secret env (GHCR_PR_TTL_DAYS/GHCR_NIGHTLY_TTL_DAYS), (3) defaults
+          def int_or_default(v, default):
+              try:
+                  return int(v)
+              except Exception:
+                  return int(default)
 
-DRY_RUN = os.environ.get('DRY_RUN_INPUT', 'true').lower() in ('1','true','yes')
-PR_TTL = None
-NIGHTLY_TTL = None
-if os.environ.get('PR_TTL_INPUT'):
-  PR_TTL = int_or_default(os.environ['PR_TTL_INPUT'], os.environ['DEFAULT_PR_TTL'])
-elif os.environ.get('GHCR_PR_TTL_DAYS'):
-  PR_TTL = int_or_default(os.environ['GHCR_PR_TTL_DAYS'], os.environ['DEFAULT_PR_TTL'])
-else:
-  PR_TTL = int_or_default(os.environ['DEFAULT_PR_TTL'], 1)
+          DRY_RUN = os.environ.get('DRY_RUN_INPUT', 'true').lower() in ('1','true','yes')
+          PR_TTL = None
+          NIGHTLY_TTL = None
+          if os.environ.get('PR_TTL_INPUT'):
+              PR_TTL = int_or_default(os.environ['PR_TTL_INPUT'], os.environ['DEFAULT_PR_TTL'])
+          elif os.environ.get('GHCR_PR_TTL_DAYS'):
+              PR_TTL = int_or_default(os.environ['GHCR_PR_TTL_DAYS'], os.environ['DEFAULT_PR_TTL'])
+          else:
+              PR_TTL = int_or_default(os.environ['DEFAULT_PR_TTL'], 1)
 
-if os.environ.get('NIGHTLY_TTL_INPUT'):
-  NIGHTLY_TTL = int_or_default(os.environ['NIGHTLY_TTL_INPUT'], os.environ['DEFAULT_NIGHTLY_TTL'])
-elif os.environ.get('GHCR_NIGHTLY_TTL_DAYS'):
-  NIGHTLY_TTL = int_or_default(os.environ['GHCR_NIGHTLY_TTL_DAYS'], os.environ['DEFAULT_NIGHTLY_TTL'])
-else:
-  NIGHTLY_TTL = int_or_default(os.environ['DEFAULT_NIGHTLY_TTL'], 7)
+          if os.environ.get('NIGHTLY_TTL_INPUT'):
+              NIGHTLY_TTL = int_or_default(os.environ['NIGHTLY_TTL_INPUT'], os.environ['DEFAULT_NIGHTLY_TTL'])
+          elif os.environ.get('GHCR_NIGHTLY_TTL_DAYS'):
+              NIGHTLY_TTL = int_or_default(os.environ['GHCR_NIGHTLY_TTL_DAYS'], os.environ['DEFAULT_NIGHTLY_TTL'])
+          else:
+              NIGHTLY_TTL = int_or_default(os.environ['DEFAULT_NIGHTLY_TTL'], 7)
 
-OWNER = os.environ['OWNER']
-PACKAGE = os.environ['PACKAGE_NAME']
-TOKEN = os.environ['GITHUB_TOKEN']
+          OWNER = os.environ['OWNER']
+          PACKAGE = os.environ['PACKAGE_NAME']
+          TOKEN = os.environ['GITHUB_TOKEN']
 
-to_delete = []
-for item in data:
-  vid = item.get('id')
-  created = item.get('created_at')
-  tags = item.get('metadata', {}).get('tags') or []
-  if not tags:
-    continue
-  a = age_days(created)
-  for t in tags:
-    if t.startswith('pr-') and a >= PR_TTL:
-      to_delete.append((vid, t, a)); break
-    if t.startswith('nightly-') and a >= NIGHTLY_TTL:
-      to_delete.append((vid, t, a)); break
+          to_delete = []
+          for item in data:
+              vid = item.get('id')
+              created = item.get('created_at')
+              tags = item.get('metadata', {}).get('tags') or []
+              if not tags:
+                  continue
+              a = age_days(created)
+              for t in tags:
+                  if t.startswith('pr-') and a >= PR_TTL:
+                      to_delete.append((vid, t, a)); break
+                  if t.startswith('nightly-') and a >= NIGHTLY_TTL:
+                      to_delete.append((vid, t, a)); break
 
-print(f"Found {len(to_delete)} candidate versions to delete (PR_TTL={PR_TTL}, NIGHTLY_TTL={NIGHTLY_TTL}, DRY_RUN={DRY_RUN})")
-for vid, tag, a in to_delete:
-  print(f"Candidate: id={vid} tag={tag} age_days={a}")
-  if DRY_RUN:
-    continue
-  print(f"Deleting version id={vid} tag={tag} age_days={a}")
-  resp = subprocess.run([
-    'curl','-sS','-X','DELETE',
-    '-H', f'Authorization: token {TOKEN}',
-    f'https://api.github.com/orgs/{OWNER}/packages/container/{PACKAGE}/versions/{vid}'
-  ], capture_output=True)
-  if resp.returncode == 0:
-    print(f"Deleted {vid}")
-  else:
-    print(f"Failed to delete {vid}: {resp.returncode} {resp.stdout} {resp.stderr}")
-PY
+          print(f"Found {len(to_delete)} candidate versions to delete (PR_TTL={PR_TTL}, NIGHTLY_TTL={NIGHTLY_TTL}, DRY_RUN={DRY_RUN})")
+          for vid, tag, a in to_delete:
+              print(f"Candidate: id={vid} tag={tag} age_days={a}")
+              if DRY_RUN:
+                  continue
+              print(f"Deleting version id={vid} tag={tag} age_days={a}")
+              resp = subprocess.run([
+                  'curl','-sS','-X','DELETE',
+                  '-H', f'Authorization: token {TOKEN}',
+                  f'https://api.github.com/orgs/{OWNER}/packages/container/{PACKAGE}/versions/{vid}'
+              ], capture_output=True)
+              if resp.returncode == 0:
+                  print(f"Deleted {vid}")
+              else:
+                  print(f"Failed to delete {vid}: {resp.returncode} {resp.stdout} {resp.stderr}")
+          PY
 
       - name: Done
         run: echo 'GHCR cleanup complete.'
