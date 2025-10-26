@@ -51,19 +51,19 @@ jobs:
           parsers=("docling" "marker" "mineru" "pymupdf4llm")
           for p in "${parsers[@]}"; do
             echo "Checking parser target /opt/parsers/$p importability"
-            docker exec ${CONTAINER} sh -c "python3 - <<PY
-import sys
-target = '/opt/parsers/' + '${p}'
-if target not in sys.path:
-    sys.path.insert(0, target)
-try:
-    __import__('${p}')
-    print('OK: imported ${p}')
-except Exception as e:
-    import traceback
-    traceback.print_exc()
-    sys.exit(2)
-PY"
+            docker exec ${CONTAINER} sh -c "python3 - <<'PY'
+              import sys
+              target = '/opt/parsers/' + '${p}'
+              if target not in sys.path:
+                  sys.path.insert(0, target)
+              try:
+                  __import__('${p}')
+                  print('OK: imported ${p}')
+              except Exception as e:
+                  import traceback
+                  traceback.print_exc()
+                  sys.exit(2)
+            PY"
             echo "Parser ${p} import returned: $?"
           done
 
