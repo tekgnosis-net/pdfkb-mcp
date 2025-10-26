@@ -67,18 +67,19 @@ RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 pip install --
 # Install PyTorch: use CUDA wheels when requested, otherwise install CPU-only
 # Use a BuildKit cache mount for pip downloads to reduce repeated network I/O
 # and transient disk usage. Temporarily enable pip caching for this RUN.
-RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
+RUN --mount=type=cache,target=/root/.cache/pip bash -lc '\
+    PIP_NO_CACHE_DIR=0; \
     if [ "$USE_CUDA" = "true" ]; then \
         echo "Installing CUDA PyTorch wheels (tag: $CUDA_PYTORCH_TAG)"; \
         pip uninstall -y torch torchvision torchaudio || true; \
-        uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG \
+        uv pip install --system --no-cache --index-url "https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG" \
             --upgrade --force-reinstall torch torchvision torchaudio; \
     else \
         echo "Installing CPU-only PyTorch wheels"; \
         pip uninstall -y torch torchvision torchaudio || true; \
-        uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/cpu \
+        uv pip install --system --no-cache --index-url "https://download.pytorch.org/whl/cpu" \
             --upgrade --force-reinstall torch torchvision torchaudio; \
-    fi
+    fi'
 
 # Build arguments
 ARG PYTHON_VERSION
@@ -265,7 +266,7 @@ RUN apt-get update \
 RUN if [ "$USE_CUDA" = "true" ]; then \
         echo "Installing CUDA PyTorch wheels in runtime (tag: $CUDA_PYTORCH_TAG)"; \
         pip uninstall -y torch torchvision torchaudio || true; \
-        pip install --no-cache-dir --index-url https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG \
+    pip install --no-cache-dir --index-url "https://download.pytorch.org/whl/$CUDA_PYTORCH_TAG" \
             --upgrade --force-reinstall torch torchvision torchaudio || true; \
     else \
         echo "Skipping CUDA runtime torch install (USE_CUDA=$USE_CUDA)"; \
