@@ -10,6 +10,7 @@ ARG USE_CUDA=false          # Build with CUDA-enabled PyTorch when "true"
 ARG CUDA_PYTORCH_TAG=cu118  # PyTorch CUDA wheel tag (e.g. cu118, cu121)
 ARG BASE_IMAGE=pytorch/pytorch:2.9.0-cuda13.0-cudnn9-runtime
 ARG RUNTIME_BASE_IMAGE=pytorch/pytorch:2.9.0-cuda13.0-cudnn9-runtime
+ARG SKIP_PARSER_VENVS=false  # When "true" skip creating heavy per-parser venvs in builder
 
 # ============================================================================
 # Stage 1: Builder - Install build dependencies and compile packages
@@ -127,49 +128,53 @@ RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 \
 # Only create venvs for the parser(s) requested via the build-arg `PDF_PARSER`.
 RUN --mount=type=cache,target=/root/.cache/pip PIP_NO_CACHE_DIR=0 bash -lc '\
     set -euo pipefail; \
-    pars="${PDF_PARSER:-all}"; \
-    IFS=","; for p in $pars; do \
-        p=$(echo "$p" | xargs); \
-        case "$p" in \
-            marker) \
-                echo "Creating marker venv"; \
-                python3 -m venv /build/venvs/marker; \
-                /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel || true; \
-                /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true; \
-                ;; \
-            mineru) \
-                echo "Creating mineru venv"; \
-                python3 -m venv /build/venvs/mineru; \
-                /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel || true; \
-                /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true; \
-                ;; \
-            docling) \
-                echo "Creating docling venv"; \
-                python3 -m venv /build/venvs/docling; \
-                /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel || true; \
-                /build/venvs/docling/bin/pip install docling>=2.43.0 || true; \
-                ;; \
-            pymupdf4llm) \
-                echo "Creating pymupdf4llm venv"; \
-                python3 -m venv /build/venvs/pymupdf4llm; \
-                /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel || true; \
-                /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true; \
-                ;; \
-            all) \
-                echo "Building all parser venvs"; \
-                for q in marker mineru docling pymupdf4llm; do \
-                    echo "-> $q"; \
-                    case "$q" in \
-                        marker) python3 -m venv /build/venvs/marker; /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true ;; \
-                        mineru) python3 -m venv /build/venvs/mineru; /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true ;; \
-                        docling) python3 -m venv /build/venvs/docling; /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/docling/bin/pip install docling>=2.43.0 || true ;; \
-                        pymupdf4llm) python3 -m venv /build/venvs/pymupdf4llm; /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true ;; \
-                    esac; \
-                done; \
-                ;; \
-            *) echo "Unknown parser: $p (skipping)" ;; \
-        esac; \
-    done'
+    if [ "${SKIP_PARSER_VENVS:-false}" = "true" ]; then \
+        echo "SKIP_PARSER_VENVS=true: skipping per-parser venv creation in builder"; \
+    else \
+        pars="${PDF_PARSER:-all}"; \
+        IFS=","; for p in $pars; do \
+            p=$(echo "$p" | xargs); \
+            case "$p" in \
+                marker) \
+                    echo "Creating marker venv"; \
+                    python3 -m venv /build/venvs/marker; \
+                    /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel || true; \
+                    /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true; \
+                    ;; \
+                mineru) \
+                    echo "Creating mineru venv"; \
+                    python3 -m venv /build/venvs/mineru; \
+                    /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel || true; \
+                    /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true; \
+                    ;; \
+                docling) \
+                    echo "Creating docling venv"; \
+                    python3 -m venv /build/venvs/docling; \
+                    /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel || true; \
+                    /build/venvs/docling/bin/pip install docling>=2.43.0 || true; \
+                    ;; \
+                pymupdf4llm) \
+                    echo "Creating pymupdf4llm venv"; \
+                    python3 -m venv /build/venvs/pymupdf4llm; \
+                    /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel || true; \
+                    /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true; \
+                    ;; \
+                all) \
+                    echo "Building all parser venvs"; \
+                    for q in marker mineru docling pymupdf4llm; do \
+                        echo "-> $q"; \
+                        case "$q" in \
+                            marker) python3 -m venv /build/venvs/marker; /build/venvs/marker/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/marker/bin/pip install marker-pdf>=1.10.0 Pillow>=10.1.0,<11.0.0 || true ;; \
+                            mineru) python3 -m venv /build/venvs/mineru; /build/venvs/mineru/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/mineru/bin/pip install "mineru[pipeline]>=2.1.10" Pillow>=11.0.0 || true ;; \
+                            docling) python3 -m venv /build/venvs/docling; /build/venvs/docling/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/docling/bin/pip install docling>=2.43.0 || true ;; \
+                            pymupdf4llm) python3 -m venv /build/venvs/pymupdf4llm; /build/venvs/pymupdf4llm/bin/pip install --upgrade pip setuptools wheel || true; /build/venvs/pymupdf4llm/bin/pip install pymupdf4llm>=0.0.27 || true ;; \
+                        esac; \
+                    done; \
+                    ;; \
+                *) echo "Unknown parser: $p (skipping)" ;; \
+            esac; \
+        done; \
+    fi'
 
 
 # ============================================================================
